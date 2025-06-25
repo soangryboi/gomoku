@@ -118,6 +118,7 @@ function minimax(board, depth, alpha, beta, maximizing, aiStone, playerStone) {
   if (winner === aiStone) return [1000000, null];
   if (winner === playerStone) return [-1000000, null];
   if (depth === 0) return [evaluate(board, aiStone, playerStone), null];
+  
   let moves = [];
   // 최근 돌 주변 1칸만 후보로
   for (let y = 0; y < BOARD_SIZE; y++) {
@@ -134,6 +135,11 @@ function minimax(board, depth, alpha, beta, maximizing, aiStone, playerStone) {
       }
     }
   }
+  
+  // 중복 제거
+  moves = Array.from(new Set(moves.map(([y, x]) => y + ',' + x))).map(s => s.split(',').map(Number));
+  
+  // 후보 수가 없으면 모든 빈 칸을 후보로
   if (moves.length === 0) {
     for (let y = 0; y < BOARD_SIZE; y++) {
       for (let x = 0; x < BOARD_SIZE; x++) {
@@ -141,36 +147,39 @@ function minimax(board, depth, alpha, beta, maximizing, aiStone, playerStone) {
       }
     }
   }
-  moves = Array.from(new Set(moves.map(([y, x]) => y + ',' + x))).map(s => s.split(',').map(Number));
-  let bestMove = null;
+  
+  // 여전히 후보 수가 없으면 null 반환
+  if (moves.length === 0) return [0, null];
+  
+  let bestMove = moves[0]; // 기본값 설정
+  let bestEval = maximizing ? -Infinity : Infinity;
+  
   if (maximizing) {
-    let maxEval = -Infinity;
     for (let [y, x] of moves) {
       board[y][x] = aiStone;
       const [evalScore] = minimax(board, depth - 1, alpha, beta, false, aiStone, playerStone);
       board[y][x] = 0;
-      if (evalScore > maxEval) {
-        maxEval = evalScore;
+      if (evalScore > bestEval) {
+        bestEval = evalScore;
         bestMove = [y, x];
       }
       alpha = Math.max(alpha, evalScore);
       if (beta <= alpha) break;
     }
-    return [maxEval, bestMove];
+    return [bestEval, bestMove];
   } else {
-    let minEval = Infinity;
     for (let [y, x] of moves) {
       board[y][x] = playerStone;
       const [evalScore] = minimax(board, depth - 1, alpha, beta, true, aiStone, playerStone);
       board[y][x] = 0;
-      if (evalScore < minEval) {
-        minEval = evalScore;
+      if (evalScore < bestEval) {
+        bestEval = evalScore;
         bestMove = [y, x];
       }
       beta = Math.min(beta, evalScore);
       if (beta <= alpha) break;
     }
-    return [minEval, bestMove];
+    return [bestEval, bestMove];
   }
 }
 
@@ -213,15 +222,37 @@ export default function Gomoku() {
   const [firstPlayerMove, setFirstPlayerMove] = useState(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [pendingMove, setPendingMove] = useState(null); // 임시 착수 위치
+  const [showWelcome, setShowWelcome] = useState(true); // 환영 메시지 표시
+
+  // 환영 메시지 3초 후 자동 숨김
+  React.useEffect(() => {
+    if (showWelcome) {
+      const timer = setTimeout(() => {
+        setShowWelcome(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [showWelcome]);
 
   function aiMove(newBoard, aiStone, playerStone, depth, firstPlayerMove) {
     if (newBoard.flat().every(cell => cell === 0)) {
       return [CENTER, CENTER];
     }
     if (firstPlayerMove && newBoard.flat().filter(cell => cell !== 0).length === 1) {
-      return getAdjacentEmpty(newBoard, firstPlayerMove[0], firstPlayerMove[1]);
+      const adjacent = getAdjacentEmpty(newBoard, firstPlayerMove[0], firstPlayerMove[1]);
+      return adjacent || [CENTER, CENTER];
     }
     const [, move] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
+    // move가 null이면 안전한 기본값 반환
+    if (!move) {
+      // 빈 칸 중 하나를 찾아서 반환
+      for (let y = 0; y < BOARD_SIZE; y++) {
+        for (let x = 0; x < BOARD_SIZE; x++) {
+          if (newBoard[y][x] === 0) return [y, x];
+        }
+      }
+      return [CENTER, CENTER]; // 최후의 수단
+    }
     return move;
   }
 
@@ -280,14 +311,18 @@ export default function Gomoku() {
       setPendingMove([ny, nx]);
     };
     return (
-      <div style={{ marginTop: 5, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5 }}>
-        <button onClick={() => move(-1, 0)} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 5 }}>↑</button>
-        <div style={{ display: 'flex', gap: 5 }}>
-          <button onClick={() => move(0, -1)} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 5 }}>←</button>
-          <button onClick={() => move(1, 0)} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 5 }}>↓</button>
-          <button onClick={() => move(0, 1)} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 5 }}>→</button>
+      <div style={{ marginTop: 10 }}>
+        <div>
+          <button onClick={() => move(-1, 0)} style={{ width: 50, height: 50, fontSize: 24 }}>↑</button>
         </div>
-        <button onClick={handleConfirmMove} style={{ width: 80, height: 40, fontSize: 16, borderRadius: 5, background: '#222', color: '#fff' }}>확인</button>
+        <div>
+          <button onClick={() => move(0, -1)} style={{ width: 50, height: 50, fontSize: 24 }}>←</button>
+          <button onClick={() => move(1, 0)} style={{ width: 50, height: 50, fontSize: 24, margin: '0 10px' }}>↓</button>
+          <button onClick={() => move(0, 1)} style={{ width: 50, height: 50, fontSize: 24 }}>→</button>
+        </div>
+        <div>
+          <button onClick={handleConfirmMove} style={{ width: 120, height: 40, fontSize: 20, marginTop: 8 }}>확인</button>
+        </div>
       </div>
     );
   }
@@ -380,6 +415,8 @@ export default function Gomoku() {
     maxWidth: '100vw',
     overflowX: 'auto',
     touchAction: 'manipulation',
+    // 모바일에서 불필요한 빈 공간 제거
+    ...(IS_MOBILE && { height: 'fit-content' }),
   };
   const svgStyle = {
     background: '#deb887',
@@ -394,6 +431,24 @@ export default function Gomoku() {
   return (
     <div style={{ textAlign: 'center', marginTop: 30 }}>
       <h2>오목 게임 (React)</h2>
+      {showWelcome && (
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(0, 0, 0, 0.8)',
+          color: 'white',
+          padding: '20px 40px',
+          borderRadius: '10px',
+          fontSize: '24px',
+          fontWeight: 'bold',
+          zIndex: 1000,
+          animation: 'fadeInOut 3s ease-in-out'
+        }}>
+          김태은님 안녕하세요
+        </div>
+      )}
       {selecting ? (
         <div style={{ margin: '60px auto', display: 'inline-block', background: '#deb887', padding: 40, borderRadius: 10 }}>
           <div style={{ fontSize: 28, marginBottom: 30 }}>돌을 선택하세요</div>
@@ -425,7 +480,7 @@ export default function Gomoku() {
                 width: 120, height: 60, margin: 10, fontSize: 22, borderRadius: 10, border: '2px solid #222', background: '#fff', color: '#222', cursor: 'pointer'
               }}
             >
-              {level.label}
+              {level.label === 'Easy' ? 'EASY(이준희실력)' : level.label}
             </button>
           ))}
         </div>
@@ -508,10 +563,14 @@ export default function Gomoku() {
               ? <h3 style={
                   difficulty.label === 'TINI 모드' && winner === playerStone 
                     ? { fontSize: '2.5em', fontWeight: 'bold', color: '#ff6b6b', textShadow: '2px 2px 4px rgba(0,0,0,0.3)' }
+                    : difficulty.label === 'Easy' && winner === playerStone
+                    ? { fontSize: '2.5em', fontWeight: 'bold', color: '#ff6b6b', textShadow: '2px 2px 4px rgba(0,0,0,0.3)' }
                     : {}
                 }>
                   {difficulty.label === 'TINI 모드' && winner === playerStone 
                     ? '티티보 우승!!' 
+                    : difficulty.label === 'Easy' && winner === playerStone
+                    ? '이준띠띠 DOWN!!'
                     : winner === playerStone ? '플레이어 승리!' : 'AI 승리!'}
                 </h3>
               : <span>현재 턴: {turn === playerStone ? (playerStone === 1 ? '흑(플레이어)' : '백(플레이어)') : (aiStone === 1 ? '흑(AI)' : '백(AI)')}</span>
