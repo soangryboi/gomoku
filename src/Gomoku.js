@@ -290,6 +290,17 @@ export default function Gomoku() {
   const [showWelcome, setShowWelcome] = useState(true); // 환영 메시지 표시
   const [forbiddenMoves, setForbiddenMoves] = useState([]); // 금수 위치
   const [moveCount, setMoveCount] = useState(0); // 현재 수순
+  const [aiResigned, setAiResigned] = useState(false); // AI 기권 상태
+
+  // 스크롤 위치 유지
+  React.useEffect(() => {
+    if (IS_MOBILE && !selecting && !selectingDifficulty) {
+      const gameContainer = document.querySelector('.game-container');
+      if (gameContainer) {
+        gameContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [board, turn, aiThinking]);
 
   // 환영 메시지 3초 후 자동 숨김
   React.useEffect(() => {
@@ -325,7 +336,10 @@ export default function Gomoku() {
       const adjacent = getAdjacentEmpty(newBoard, firstPlayerMove[0], firstPlayerMove[1]);
       return adjacent || [CENTER, CENTER];
     }
+    
+    // AI가 이길 수 있는지 확인
     const [, move] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
+    
     // move가 null이면 안전한 기본값 반환
     if (!move) {
       // 빈 칸 중 하나를 찾아서 반환
@@ -336,6 +350,13 @@ export default function Gomoku() {
       }
       return [CENTER, CENTER]; // 최후의 수단
     }
+    
+    // AI가 이길 수 없는 상황인지 확인 (평가 점수가 매우 낮으면)
+    const [evalScore] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
+    if (evalScore < -50000) { // 매우 불리한 상황
+      return null; // 기권 신호
+    }
+    
     return move;
   }
 
@@ -448,6 +469,10 @@ export default function Gomoku() {
             // 플레이어 차례가 되면 중앙에서 임시 돌 시작
             setPendingMove([CENTER, CENTER]);
           }
+        } else {
+          // AI 기권
+          setAiResigned(true);
+          setWinner(playerStone);
         }
         setAiThinking(false);
       }, 10);
@@ -466,6 +491,7 @@ export default function Gomoku() {
     setDifficulty(DIFFICULTY_LEVELS[1]);
     setFirstPlayerMove(null);
     setMoveCount(0);
+    setAiResigned(false);
   }
 
   function handleSelectStone(stone) {
@@ -529,7 +555,7 @@ export default function Gomoku() {
   };
 
   return (
-    <div style={{ textAlign: 'center', marginTop: IS_MOBILE ? 5 : 30 }}>
+    <div className="game-container" style={{ textAlign: 'center', marginTop: IS_MOBILE ? 5 : 30 }}>
       <h2 style={{ fontSize: IS_MOBILE ? '18px' : '24px', margin: IS_MOBILE ? '2px 0' : '20px 0' }}>오목 게임 (React)</h2>
       {showWelcome && (
         <div style={{
@@ -701,7 +727,9 @@ export default function Gomoku() {
                     ? { fontSize: '3em', fontWeight: 'bold', color: '#ffd700', textShadow: '3px 3px 6px rgba(0,0,0,0.5)', animation: 'glow 2s ease-in-out infinite alternate' }
                     : {}
                 }>
-                  {difficulty.label === 'TINI 모드' && winner === playerStone 
+                  {aiResigned 
+                    ? 'AI 기권! 플레이어 승리!' 
+                    : difficulty.label === 'TINI 모드' && winner === playerStone 
                     ? '티티보 우승!!' 
                     : difficulty.label === 'Easy' && winner === playerStone
                     ? '이준띠띠 DOWN!!'
