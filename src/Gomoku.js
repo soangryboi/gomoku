@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import * as tf from '@tensorflow/tfjs';
 
 const IS_MOBILE = typeof window !== 'undefined' && window.innerWidth < 700;
 const BOARD_SIZE = 16;
