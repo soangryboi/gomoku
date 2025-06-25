@@ -21,8 +21,9 @@ function checkWinner(board) {
       if (board[y][x] === 0) continue;
       const player = board[y][x];
       for (let [dx, dy] of directions) {
-        let count = 0;
-        for (let i = 0; i < 5; i++) {
+        let count = 1; // 현재 위치 포함
+        // 정방향 확인
+        for (let i = 1; i <= 4; i++) {
           const nx = x + dx * i;
           const ny = y + dy * i;
           if (
@@ -35,6 +36,21 @@ function checkWinner(board) {
             break;
           }
         }
+        // 역방향 확인
+        for (let i = 1; i <= 4; i++) {
+          const nx = x - dx * i;
+          const ny = y - dy * i;
+          if (
+            nx >= 0 && nx < BOARD_SIZE &&
+            ny >= 0 && ny < BOARD_SIZE &&
+            board[ny][nx] === player
+          ) {
+            count++;
+          } else {
+            break;
+          }
+        }
+        // 정확히 5목일 때만 승리
         if (count === 5) return player;
       }
     }
@@ -183,12 +199,234 @@ function minimax(board, depth, alpha, beta, maximizing, aiStone, playerStone) {
   }
 }
 
+// MCTS Node 클래스
+class MCTSNode {
+  constructor(board, move = null, parent = null) {
+    this.board = board.map(row => row.slice());
+    this.move = move; // [y, x]
+    this.parent = parent;
+    this.children = [];
+    this.visits = 0;
+    this.wins = 0;
+    this.untriedMoves = this.getValidMoves();
+  }
+
+  getValidMoves() {
+    const moves = [];
+    const hasStones = this.board.flat().some(cell => cell !== 0);
+    
+    if (!hasStones) {
+      // 첫 수는 중앙
+      return [[CENTER, CENTER]];
+    }
+    
+    // 기존 돌 주변 2칸만 탐색 (수천 배 빠름)
+    for (let y = 0; y < BOARD_SIZE; y++) {
+      for (let x = 0; x < BOARD_SIZE; x++) {
+        if (this.board[y][x] !== 0) {
+          // 주변 2칸 탐색
+          for (let dy = -2; dy <= 2; dy++) {
+            for (let dx = -2; dx <= 2; dx++) {
+              const ny = y + dy, nx = x + dx;
+              if (ny >= 0 && ny < BOARD_SIZE && nx >= 0 && nx < BOARD_SIZE && 
+                  this.board[ny][nx] === 0) {
+                moves.push([ny, nx]);
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // 중복 제거
+    const uniqueMoves = Array.from(new Set(moves.map(([y, x]) => y + ',' + x)))
+      .map(s => s.split(',').map(Number));
+    
+    // 후보가 없으면 모든 빈칸 반환
+    if (uniqueMoves.length === 0) {
+      for (let y = 0; y < BOARD_SIZE; y++) {
+        for (let x = 0; x < BOARD_SIZE; x++) {
+          if (this.board[y][x] === 0) {
+            uniqueMoves.push([y, x]);
+          }
+        }
+      }
+    }
+    
+    return uniqueMoves;
+  }
+
+  isTerminal() {
+    return checkWinner(this.board) !== 0 || this.untriedMoves.length === 0;
+  }
+
+  getUCB1(c) {
+    if (this.visits === 0) return Infinity;
+    return (this.wins / this.visits) + c * Math.sqrt(Math.log(this.parent.visits) / this.visits);
+  }
+}
+
+// 간단한 평가 함수 (시뮬레이션용)
+function simpleEvaluate(board, playerStone, aiStone) {
+  let score = 0;
+  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  
+  for (let y = 0; y < BOARD_SIZE; y++) {
+    for (let x = 0; x < BOARD_SIZE; x++) {
+      if (board[y][x] === 0) continue;
+      const stone = board[y][x];
+      
+      for (let [dx, dy] of directions) {
+        let count = 1;
+        // 정방향 확인
+        for (let i = 1; i <= 4; i++) {
+          const nx = x + dx * i, ny = y + dy * i;
+          if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] === stone) {
+            count++;
+          } else break;
+        }
+        // 역방향 확인
+        for (let i = 1; i <= 4; i++) {
+          const nx = x - dx * i, ny = y - dy * i;
+          if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] === stone) {
+            count++;
+          } else break;
+        }
+        
+        // 점수 계산
+        if (stone === aiStone) {
+          if (count >= 5) score += 1000;
+          else if (count === 4) score += 100;
+          else if (count === 3) score += 10;
+        } else {
+          if (count >= 5) score -= 1000;
+          else if (count === 4) score -= 100;
+          else if (count === 3) score -= 10;
+        }
+      }
+    }
+  }
+  return score;
+}
+
+// MCTS 알고리즘
+function mcts(board, iterations = 1000, playerStone, aiStone) {
+  const root = new MCTSNode(board);
+  
+  for (let i = 0; i < iterations; i++) {
+    let node = root;
+    
+    // Selection
+    while (node.isTerminal() && node.children.length > 0) {
+      node = selectChild(node);
+    }
+    
+    // Expansion
+    if (!node.isTerminal()) {
+      const move = node.untriedMoves[Math.floor(Math.random() * node.untriedMoves.length)];
+      const newBoard = node.board.map(row => row.slice());
+      newBoard[move[0]][move[1]] = node.children.length % 2 === 0 ? playerStone : aiStone;
+      const child = new MCTSNode(newBoard, move, node);
+      node.children.push(child);
+      node = child;
+    }
+    
+    // Simulation (semi-random)
+    const result = simulate(node.board, playerStone, aiStone);
+    
+    // Backpropagation
+    while (node !== null) {
+      node.visits++;
+      if (result === aiStone) {
+        node.wins++;
+      }
+      node = node.parent;
+    }
+  }
+  
+  // Best move 선택
+  let bestChild = root.children[0];
+  for (const child of root.children) {
+    if (child.visits > bestChild.visits) {
+      bestChild = child;
+    }
+  }
+  
+  return bestChild ? bestChild.move : null;
+}
+
+// Selection 단계
+function selectChild(node) {
+  const c = Math.sqrt(2);
+  let bestChild = node.children[0];
+  let bestUCB = bestChild.getUCB1(c);
+  
+  for (const child of node.children) {
+    const ucb = child.getUCB1(c);
+    if (ucb > bestUCB) {
+      bestUCB = ucb;
+      bestChild = child;
+    }
+  }
+  
+  return bestChild;
+}
+
+// Simulation 단계 (semi-random)
+function simulate(board, playerStone, aiStone) {
+  const simBoard = board.map(row => row.slice());
+  let currentPlayer = playerStone;
+  let moveCount = 0;
+  const maxMoves = 50; // 무한 루프 방지
+  
+  while (moveCount < maxMoves) {
+    const winner = checkWinner(simBoard);
+    if (winner !== 0) return winner;
+    
+    const validMoves = [];
+    for (let y = 0; y < BOARD_SIZE; y++) {
+      for (let x = 0; x < BOARD_SIZE; x++) {
+        if (simBoard[y][x] === 0) {
+          validMoves.push([y, x]);
+        }
+      }
+    }
+    
+    if (validMoves.length === 0) return 0; // 무승부
+    
+    // semi-random: 70% 확률로 평가 함수 사용, 30% 확률로 랜덤
+    let bestMove = validMoves[0];
+    if (Math.random() < 0.7 && validMoves.length > 1) {
+      let bestScore = -Infinity;
+      for (const move of validMoves) {
+        const testBoard = simBoard.map(row => row.slice());
+        testBoard[move[0]][move[1]] = currentPlayer;
+        const score = simpleEvaluate(testBoard, playerStone, aiStone);
+        if (score > bestScore) {
+          bestScore = score;
+          bestMove = move;
+        }
+      }
+    } else {
+      bestMove = validMoves[Math.floor(Math.random() * validMoves.length)];
+    }
+    
+    simBoard[bestMove[0]][bestMove[1]] = currentPlayer;
+    currentPlayer = currentPlayer === playerStone ? aiStone : playerStone;
+    moveCount++;
+  }
+  
+  // 최대 이동 수에 도달하면 평가 함수로 승자 결정
+  const finalScore = simpleEvaluate(simBoard, playerStone, aiStone);
+  return finalScore > 0 ? aiStone : finalScore < 0 ? playerStone : 0;
+}
+
 const DIFFICULTY_LEVELS = [
   { label: 'Easy', depth: 1 },
   { label: 'Normal', depth: 2 },
   { label: 'Hard', depth: 3 },
-  { label: 'TINI 모드', depth: 3 },
-  { label: 'TITIBO 모드', depth: 4 },
+  { label: 'TINI 모드', depth: 4 },
+  { label: 'TITIBO 모드', depth: 5 },
 ];
 
 function getAdjacentEmpty(board, y, x) {
@@ -261,13 +499,118 @@ function checkDoubleOpenThree(board, y, x, stone) {
   return openThreeCount >= 2;
 }
 
-// 금수 위치 찾기
+// 4-4 금수 감지 함수
+function checkDoubleOpenFour(board, y, x, stone) {
+  const directions = [
+    [1, 0], [0, 1], [1, 1], [1, -1]
+  ];
+  let openFourCount = 0;
+  
+  // 임시로 돌을 놓아서 테스트
+  board[y][x] = stone;
+  
+  for (let [dx, dy] of directions) {
+    // 양방향으로 확인
+    let count = 0;
+    let openEnds = 0;
+    
+    // 정방향 확인
+    for (let i = 1; i <= 4; i++) {
+      const nx = x + dx * i, ny = y + dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === stone) count++;
+        else if (board[ny][nx] === 0) {
+          openEnds++;
+          break;
+        } else break;
+      } else break;
+    }
+    
+    // 역방향 확인
+    for (let i = 1; i <= 4; i++) {
+      const nx = x - dx * i, ny = y - dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === stone) count++;
+        else if (board[ny][nx] === 0) {
+          openEnds++;
+          break;
+        } else break;
+      } else break;
+    }
+    
+    // 열린 4인지 확인 (돌 4개 + 양쪽이 열려있음)
+    if (count === 3 && openEnds === 2) {
+      openFourCount++;
+    }
+  }
+  
+  // 원래 상태로 복원
+  board[y][x] = 0;
+  
+  return openFourCount >= 2;
+}
+
+// 6목 이상 장목 감지 함수
+function checkOverline(board, y, x, stone) {
+  const directions = [
+    [1, 0], [0, 1], [1, 1], [1, -1]
+  ];
+  
+  // 임시로 돌을 놓아서 테스트
+  board[y][x] = stone;
+  
+  for (let [dx, dy] of directions) {
+    let count = 1; // 현재 위치 포함
+    
+    // 정방향 확인
+    for (let i = 1; i <= 5; i++) {
+      const nx = x + dx * i, ny = y + dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] === stone) {
+        count++;
+      } else break;
+    }
+    
+    // 역방향 확인
+    for (let i = 1; i <= 5; i++) {
+      const nx = x - dx * i, ny = y - dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] === stone) {
+        count++;
+      } else break;
+    }
+    
+    // 6목 이상이면 장목
+    if (count >= 6) {
+      board[y][x] = 0;
+      return true;
+    }
+  }
+  
+  // 원래 상태로 복원
+  board[y][x] = 0;
+  return false;
+}
+
+// 금수 위치 찾기 (3-3, 4-4, 장목 포함)
 function findForbiddenMoves(board, stone) {
   const forbidden = [];
   for (let y = 0; y < BOARD_SIZE; y++) {
     for (let x = 0; x < BOARD_SIZE; x++) {
-      if (board[y][x] === 0 && checkDoubleOpenThree(board, y, x, stone)) {
-        forbidden.push([y, x]);
+      if (board[y][x] === 0) {
+        // 3-3 금수 체크
+        if (checkDoubleOpenThree(board, y, x, stone)) {
+          forbidden.push([y, x, '3-3']);
+          continue;
+        }
+        // 4-4 금수 체크
+        if (checkDoubleOpenFour(board, y, x, stone)) {
+          forbidden.push([y, x, '4-4']);
+          continue;
+        }
+        // 장목 체크
+        if (checkOverline(board, y, x, stone)) {
+          forbidden.push([y, x, '장목']);
+          continue;
+        }
       }
     }
   }
@@ -337,8 +680,27 @@ export default function Gomoku() {
       return adjacent || [CENTER, CENTER];
     }
     
-    // AI가 이길 수 있는지 확인
-    const [, move] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
+    // 난이도에 따라 알고리즘 선택
+    let move = null;
+    
+    if (difficulty.label === 'TITIBO 모드') {
+      // TITIBO 모드: MCTS + 미니맥스 조합 (3000회 시뮬레이션)
+      move = mcts(newBoard, 3000, playerStone, aiStone);
+      if (!move) {
+        const [, minimaxMove] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
+        move = minimaxMove;
+      }
+    } else if (difficulty.label === 'TINI 모드') {
+      // TINI 모드: MCTS (2000회 시뮬레이션)
+      move = mcts(newBoard, 2000, playerStone, aiStone);
+    } else if (difficulty.label === 'Hard') {
+      // Hard 모드: MCTS (1000회 시뮬레이션)
+      move = mcts(newBoard, 1000, playerStone, aiStone);
+    } else {
+      // Easy/Normal 모드: 미니맥스
+      const [, minimaxMove] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
+      move = minimaxMove;
+    }
     
     // move가 null이면 안전한 기본값 반환
     if (!move) {
@@ -440,6 +802,18 @@ export default function Gomoku() {
     // 3-3 금수 체크
     if (checkDoubleOpenThree(board, y, x, playerStone)) {
       alert('3-3 금수입니다! 다른 위치에 두세요.');
+      return;
+    }
+    
+    // 4-4 금수 체크
+    if (checkDoubleOpenFour(board, y, x, playerStone)) {
+      alert('4-4 금수입니다! 다른 위치에 두세요.');
+      return;
+    }
+    
+    // 장목 체크
+    if (checkOverline(board, y, x, playerStone)) {
+      alert('6목 이상 장목입니다! 다른 위치에 두세요.');
       return;
     }
     
@@ -673,14 +1047,14 @@ export default function Gomoku() {
               )
             )}
             {/* 금수 위치 X표시 */}
-            {forbiddenMoves.map(([fy, fx]) => (
+            {forbiddenMoves.map(([fy, fx, type]) => (
               <g key={`forbidden-${fy}-${fx}`}>
                 <line
                   x1={fx * CELL_SIZE - 8}
                   y1={fy * CELL_SIZE - 8}
                   x2={fx * CELL_SIZE + 8}
                   y2={fy * CELL_SIZE + 8}
-                  stroke="red"
+                  stroke={type === '3-3' ? 'red' : type === '4-4' ? 'orange' : 'purple'}
                   strokeWidth={2}
                 />
                 <line
@@ -688,7 +1062,7 @@ export default function Gomoku() {
                   y1={fy * CELL_SIZE - 8}
                   x2={fx * CELL_SIZE - 8}
                   y2={fy * CELL_SIZE + 8}
-                  stroke="red"
+                  stroke={type === '3-3' ? 'red' : type === '4-4' ? 'orange' : 'purple'}
                   strokeWidth={2}
                 />
               </g>
