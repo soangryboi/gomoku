@@ -280,18 +280,14 @@ export default function Gomoku() {
       setPendingMove([ny, nx]);
     };
     return (
-      <div style={{ marginTop: 10 }}>
-        <div>
-          <button onClick={() => move(-1, 0)} style={{ width: 50, height: 50, fontSize: 24 }}>↑</button>
+      <div style={{ marginTop: 5, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5 }}>
+        <button onClick={() => move(-1, 0)} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 5 }}>↑</button>
+        <div style={{ display: 'flex', gap: 5 }}>
+          <button onClick={() => move(0, -1)} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 5 }}>←</button>
+          <button onClick={() => move(1, 0)} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 5 }}>↓</button>
+          <button onClick={() => move(0, 1)} style={{ width: 40, height: 40, fontSize: 20, borderRadius: 5 }}>→</button>
         </div>
-        <div>
-          <button onClick={() => move(0, -1)} style={{ width: 50, height: 50, fontSize: 24 }}>←</button>
-          <button onClick={() => move(1, 0)} style={{ width: 50, height: 50, fontSize: 24, margin: '0 10px' }}>↓</button>
-          <button onClick={() => move(0, 1)} style={{ width: 50, height: 50, fontSize: 24 }}>→</button>
-        </div>
-        <div>
-          <button onClick={handleConfirmMove} style={{ width: 120, height: 40, fontSize: 20, marginTop: 8 }}>확인</button>
-        </div>
+        <button onClick={handleConfirmMove} style={{ width: 80, height: 40, fontSize: 16, borderRadius: 5, background: '#222', color: '#fff' }}>확인</button>
       </div>
     );
   }
@@ -509,7 +505,15 @@ export default function Gomoku() {
           {renderMoveButtons()}
           <div style={{ marginTop: 20 }}>
             {winner
-              ? <h3>{winner === playerStone ? '플레이어 승리!' : 'AI 승리!'}</h3>
+              ? <h3 style={
+                  difficulty.label === 'TINI 모드' && winner === playerStone 
+                    ? { fontSize: '2.5em', fontWeight: 'bold', color: '#ff6b6b', textShadow: '2px 2px 4px rgba(0,0,0,0.3)' }
+                    : {}
+                }>
+                  {difficulty.label === 'TINI 모드' && winner === playerStone 
+                    ? '티티보 우승!!' 
+                    : winner === playerStone ? '플레이어 승리!' : 'AI 승리!'}
+                </h3>
               : <span>현재 턴: {turn === playerStone ? (playerStone === 1 ? '흑(플레이어)' : '백(플레이어)') : (aiStone === 1 ? '흑(AI)' : '백(AI)')}</span>
             }
           </div>
