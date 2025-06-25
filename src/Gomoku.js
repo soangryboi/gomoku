@@ -1099,8 +1099,10 @@ export default function Gomoku() {
     return move;
   }, [difficulty.label]);
 
-  // 최적화된 SVG 좌표 계산
-  const getSvgCoords = useCallback((e) => {
+  // 최적화된 SVG 좌표 계산 및 착수 처리
+  const handleBoardClick = useCallback((e) => {
+    if (winner || aiThinking || turn !== playerStone) return;
+    
     let clientX, clientY;
     if (e.touches && e.touches.length > 0) {
       clientX = e.touches[0].clientX;
@@ -1109,6 +1111,7 @@ export default function Gomoku() {
       clientX = e.clientX;
       clientY = e.clientY;
     }
+    
     const svg = e.target.closest('svg');
     const rect = svg.getBoundingClientRect();
     const viewBox = svg.viewBox.baseVal;
@@ -1116,15 +1119,80 @@ export default function Gomoku() {
     const scaleY = viewBox.height / rect.height;
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
-    return [x, y];
-  }, []);
+    
+    // 좌표를 보드 인덱스로 변환
+    const boardX = Math.round(x / CELL_SIZE);
+    const boardY = Math.round(y / CELL_SIZE);
+    
+    // 유효한 범위인지 확인
+    if (boardX < 0 || boardX >= BOARD_SIZE || boardY < 0 || boardY >= BOARD_SIZE) return;
+    
+    // 이미 돌이 놓인 위치인지 확인
+    if (board[boardY][boardX] !== 0) return;
+    
+    // 금수 확인
+    if (checkDoubleOpenThree(board, boardY, boardX, playerStone)) {
+      alert('3-3 금수입니다! 다른 위치에 두세요.');
+      return;
+    }
+    
+    if (checkDoubleOpenFour(board, boardY, boardX, playerStone)) {
+      alert('4-4 금수입니다! 다른 위치에 두세요.');
+      return;
+    }
+    
+    if (checkOverline(board, boardY, boardX, playerStone)) {
+      alert('6목 이상 장목입니다! 다른 위치에 두세요.');
+      return;
+    }
+    
+    // 돌 놓기
+    const newBoard = board.map(row => row.slice());
+    newBoard[boardY][boardX] = playerStone;
+    setLastMove([boardY, boardX]);
+    setFirstPlayerMove(firstPlayerMove === null ? [boardY, boardX] : firstPlayerMove);
+    setPendingMove(null);
+    setMoveCount(prev => prev + 1);
+    
+    const win = checkWinner(newBoard);
+    setBoard(newBoard);
+    
+    if (win) {
+      setWinner(win);
+    } else {
+      setTurn(aiStone);
+      setAiThinking(true);
+      setTimeout(() => {
+        const aiYX = aiMove(newBoard, aiStone, playerStone, difficulty.depth, firstPlayerMove === null ? [boardY, boardX] : firstPlayerMove);
+        if (aiYX) {
+          const [aiY, aiX] = aiYX;
+          newBoard[aiY][aiX] = aiStone;
+          setLastMove([aiY, aiX]);
+          const win2 = checkWinner(newBoard);
+          setBoard(newBoard);
+          if (win2) setWinner(win2);
+          else {
+            setTurn(playerStone);
+            // 플레이어 차례가 되면 중앙에서 임시 돌 시작
+            setPendingMove([CENTER, CENTER]);
+          }
+        } else {
+          // AI 기권
+          setAiResigned(true);
+          setWinner(playerStone);
+        }
+        setAiThinking(false);
+      }, 10);
+    }
+  }, [board, turn, playerStone, winner, aiThinking, firstPlayerMove, aiMove, difficulty.depth, aiStone, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned, checkDoubleOpenThree, checkDoubleOpenFour, checkOverline]);
 
-  // 최적화된 착수 확인 함수
-  const handleConfirmMove = useCallback(() => {
-    if (!pendingMove || winner || aiThinking) return;
+  // 확인 버튼 클릭 핸들러
+  const handleConfirmButtonClick = useCallback(() => {
+    if (!pendingMove || winner || aiThinking || turn !== playerStone) return;
     const [y, x] = pendingMove;
     if (board[y][x] !== 0) return;
     
+    // 금수 확인
     if (checkDoubleOpenThree(board, y, x, playerStone)) {
       alert('3-3 금수입니다! 다른 위치에 두세요.');
       return;
@@ -1140,13 +1208,17 @@ export default function Gomoku() {
       return;
     }
     
+    // 돌 놓기
     const newBoard = board.map(row => row.slice());
     newBoard[y][x] = playerStone;
     setLastMove([y, x]);
     setFirstPlayerMove(firstPlayerMove === null ? [y, x] : firstPlayerMove);
     setPendingMove(null);
+    setMoveCount(prev => prev + 1);
+    
     const win = checkWinner(newBoard);
     setBoard(newBoard);
+    
     if (win) {
       setWinner(win);
     } else {
@@ -1174,21 +1246,79 @@ export default function Gomoku() {
         setAiThinking(false);
       }, 10);
     }
-  }, [aiMove, board, difficulty.depth, firstPlayerMove, playerStone, aiStone, turn, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned, checkDoubleOpenThree, checkDoubleOpenFour, checkOverline, winner, turn, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned]);
+  }, [pendingMove, board, turn, playerStone, winner, aiThinking, firstPlayerMove, aiMove, difficulty.depth, aiStone, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned, checkDoubleOpenThree, checkDoubleOpenFour, checkOverline]);
 
   // 키보드 이동 핸들러를 useCallback으로 선언
   const handleKeyDown = useCallback((e) => {
-    if (!pendingMove) return;
+    if (!pendingMove || winner || aiThinking || turn !== playerStone) return;
     let [y, x] = pendingMove;
     if (e.key === 'ArrowUp') y = Math.max(0, y - 1);
     if (e.key === 'ArrowDown') y = Math.min(BOARD_SIZE - 1, y + 1);
     if (e.key === 'ArrowLeft') x = Math.max(0, x - 1);
     if (e.key === 'ArrowRight') x = Math.min(BOARD_SIZE - 1, x + 1);
-    if (e.key === 'Enter') handleConfirmMove();
+    if (e.key === 'Enter') {
+      // 현재 pendingMove 위치에 돌 놓기
+      if (board[y][x] !== 0) return;
+      
+      // 금수 확인
+      if (checkDoubleOpenThree(board, y, x, playerStone)) {
+        alert('3-3 금수입니다! 다른 위치에 두세요.');
+        return;
+      }
+      
+      if (checkDoubleOpenFour(board, y, x, playerStone)) {
+        alert('4-4 금수입니다! 다른 위치에 두세요.');
+        return;
+      }
+      
+      if (checkOverline(board, y, x, playerStone)) {
+        alert('6목 이상 장목입니다! 다른 위치에 두세요.');
+        return;
+      }
+      
+      // 돌 놓기
+      const newBoard = board.map(row => row.slice());
+      newBoard[y][x] = playerStone;
+      setLastMove([y, x]);
+      setFirstPlayerMove(firstPlayerMove === null ? [y, x] : firstPlayerMove);
+      setPendingMove(null);
+      
+      const win = checkWinner(newBoard);
+      setBoard(newBoard);
+      
+      if (win) {
+        setWinner(win);
+      } else {
+        setTurn(aiStone);
+        setAiThinking(true);
+        setTimeout(() => {
+          const aiYX = aiMove(newBoard, aiStone, playerStone, difficulty.depth, firstPlayerMove === null ? [y, x] : firstPlayerMove);
+          if (aiYX) {
+            const [aiY, aiX] = aiYX;
+            newBoard[aiY][aiX] = aiStone;
+            setLastMove([aiY, aiX]);
+            const win2 = checkWinner(newBoard);
+            setBoard(newBoard);
+            if (win2) setWinner(win2);
+            else {
+              setTurn(playerStone);
+              // 플레이어 차례가 되면 중앙에서 임시 돌 시작
+              setPendingMove([CENTER, CENTER]);
+            }
+          } else {
+            // AI 기권
+            setAiResigned(true);
+            setWinner(playerStone);
+          }
+          setAiThinking(false);
+        }, 10);
+      }
+      return;
+    }
     if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
       setPendingMove([y, x]);
     }
-  }, [pendingMove, handleConfirmMove]);
+  }, [pendingMove, board, turn, playerStone, winner, aiThinking, firstPlayerMove, aiMove, difficulty.depth, aiStone, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned, checkDoubleOpenThree, checkDoubleOpenFour, checkOverline]);
 
   // 최적화된 키보드 이벤트 핸들러
   useEffect(() => {
@@ -1465,8 +1595,8 @@ export default function Gomoku() {
             height={BOARD_PIXEL + 1}
             viewBox={`0 0 ${BOARD_PIXEL + 1} ${BOARD_PIXEL + 1}`}
             style={svgStyle}
-            onClick={getSvgCoords}
-            onTouchStart={getSvgCoords}
+            onClick={handleBoardClick}
+            onTouchStart={handleBoardClick}
             tabIndex={0}
           >
             {gridLines}
@@ -1477,7 +1607,7 @@ export default function Gomoku() {
           {/* 확인 버튼 및 모바일 이동 버튼 */}
           {pendingMove && !winner && !aiThinking && !IS_MOBILE && (
             <button
-              onClick={handleConfirmMove}
+              onClick={handleConfirmButtonClick}
               style={{ marginTop: 16, padding: '10px 30px', fontSize: 18, background: '#222', color: '#fff', borderRadius: 8, border: 'none', cursor: 'pointer' }}
             >
               확인 (Enter)
