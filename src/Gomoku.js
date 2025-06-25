@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 
-const BOARD_SIZE = 20;
-const CELL_SIZE = 40;
+const IS_MOBILE = typeof window !== 'undefined' && window.innerWidth < 700;
+const BOARD_SIZE = 16;
+const CELL_SIZE = IS_MOBILE ? 48 : 40;
 const BOARD_PIXEL = (BOARD_SIZE - 1) * CELL_SIZE;
-const STONE_RADIUS = 16;
+const STONE_RADIUS = IS_MOBILE ? 20 : 16;
 const CENTER = Math.floor(BOARD_SIZE / 2);
 
 function createEmptyBoard() {
@@ -174,7 +175,7 @@ const DIFFICULTY_LEVELS = [
   { label: 'Easy', depth: 1 },
   { label: 'Normal', depth: 2 },
   { label: 'Hard', depth: 3 },
-  { label: 'TINI 모드', depth: 4 },
+  { label: 'TINI 모드', depth: 3 },
 ];
 
 function getAdjacentEmpty(board, y, x) {
@@ -207,13 +208,12 @@ export default function Gomoku() {
   const [aiStone, setAiStone] = useState(2);
   const [difficulty, setDifficulty] = useState(DIFFICULTY_LEVELS[1]);
   const [firstPlayerMove, setFirstPlayerMove] = useState(null);
+  const [aiThinking, setAiThinking] = useState(false);
 
   function aiMove(newBoard, aiStone, playerStone, depth, firstPlayerMove) {
-    // 첫 수(선공)라면 중앙에 둠
     if (newBoard.flat().every(cell => cell === 0)) {
       return [CENTER, CENTER];
     }
-    // 플레이어가 흑이고 첫 수를 둔 직후라면, AI는 그 돌의 상하좌우 중 한 곳에 둠
     if (firstPlayerMove && newBoard.flat().filter(cell => cell !== 0).length === 1) {
       return getAdjacentEmpty(newBoard, firstPlayerMove[0], firstPlayerMove[1]);
     }
@@ -232,16 +232,15 @@ export default function Gomoku() {
     }
     const svg = e.target.closest('svg');
     const rect = svg.getBoundingClientRect();
-    // 스크롤/확대 등에도 정확하게 SVG 좌표로 변환
-    const scaleX = svg.viewBox ? BOARD_PIXEL / svg.viewBox.baseVal.width : 1;
-    const scaleY = svg.viewBox ? BOARD_PIXEL / svg.viewBox.baseVal.height : 1;
-    const x = (clientX - rect.left) * (svg.width.baseVal.value / rect.width);
-    const y = (clientY - rect.top) * (svg.height.baseVal.value / rect.height);
+    const svgWidth = svg.viewBox.baseVal.width;
+    const svgHeight = svg.viewBox.baseVal.height;
+    const x = ((clientX - rect.left) / rect.width) * svgWidth;
+    const y = ((clientY - rect.top) / rect.height) * svgHeight;
     return [x, y];
   }
 
   function handleClickBoard(e) {
-    if (winner || selecting || selectingDifficulty) return;
+    if (winner || selecting || selectingDifficulty || aiThinking) return;
     const [offsetX, offsetY] = getSvgCoords(e);
     const x = Math.round(offsetX / CELL_SIZE);
     const y = Math.round(offsetY / CELL_SIZE);
@@ -258,6 +257,7 @@ export default function Gomoku() {
       setWinner(win);
     } else {
       setTurn(aiStone);
+      setAiThinking(true);
       setTimeout(() => {
         const aiYX = aiMove(newBoard, aiStone, playerStone, difficulty.depth, firstPlayerMove === null ? [y, x] : firstPlayerMove);
         if (aiYX) {
@@ -269,7 +269,8 @@ export default function Gomoku() {
           if (win2) setWinner(win2);
           else setTurn(playerStone);
         }
-      }, 400);
+        setAiThinking(false);
+      }, 10);
     }
   }
 
@@ -323,8 +324,10 @@ export default function Gomoku() {
   const svgStyle = {
     background: '#deb887',
     cursor: winner ? 'default' : 'pointer',
-    maxWidth: '100vw',
-    height: 'auto',
+    minWidth: 320,
+    maxWidth: 700,
+    width: '100vw',
+    height: BOARD_PIXEL + 1,
     touchAction: 'manipulation',
     display: 'block',
   };
@@ -369,9 +372,11 @@ export default function Gomoku() {
         </div>
       ) : (
         <div style={boardContainerStyle}>
+          {aiThinking && <div style={{ color: 'red', fontWeight: 'bold', margin: 10 }}>AI 생각 중...</div>}
           <svg
-            width={BOARD_PIXEL + 1}
+            width="100vw"
             height={BOARD_PIXEL + 1}
+            viewBox={`0 0 ${BOARD_PIXEL + 1} ${BOARD_PIXEL + 1}`}
             style={svgStyle}
             onClick={handleClickBoard}
             onTouchStart={handleClickBoard}
