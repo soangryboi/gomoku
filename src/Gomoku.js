@@ -417,7 +417,7 @@ function heuristicRollout(board, playerStone, aiStone) {
     // 휴리스틱 기반 수 선택
     let selectedMove;
     if (Math.random() < 0.7) { // 70% 확률로 휴리스틱 사용
-      selectedMove = selectHeuristicMove(currentBoard, validMoves, currentPlayer);
+      selectedMove = selectHeuristicMove(currentBoard, validMoves, currentPlayer, aiStone, playerStone);
     } else { // 30% 확률로 랜덤
       selectedMove = validMoves[Math.floor(Math.random() * validMoves.length)];
     }
@@ -432,14 +432,14 @@ function heuristicRollout(board, playerStone, aiStone) {
 }
 
 // 휴리스틱 수 선택
-function selectHeuristicMove(board, validMoves, currentPlayer) {
+function selectHeuristicMove(board, validMoves, currentPlayer, aiStone, playerStone) {
   let bestMove = validMoves[0];
   let bestScore = -Infinity;
   
   for (const [y, x] of validMoves) {
     // 임시로 수를 두고 평가
     board[y][x] = currentPlayer;
-    const score = evaluateMove(board, y, x, currentPlayer);
+    const score = improvedEvaluateMove(board, y, x, currentPlayer, aiStone, playerStone);
     board[y][x] = 0;
     
     if (score > bestScore) {
@@ -968,6 +968,71 @@ function findForbiddenMoves(board, stone) {
     }
   }
   return forbidden;
+}
+
+// 개선된 수 평가 함수 (즉시승/즉시패, 금수, 패턴, 복수 위협, smartEvaluate)
+function improvedEvaluateMove(board, y, x, player, aiStone, playerStone) {
+  // 1. 즉시 승리/즉시 패배 감지
+  board[y][x] = player;
+  if (checkWinner(board) === player) {
+    board[y][x] = 0;
+    return 1000000; // 즉시 승리
+  }
+  // 상대가 바로 이길 수 있는 수 방어
+  board[y][x] = player === aiStone ? playerStone : aiStone;
+  if (checkWinner(board) === (player === aiStone ? playerStone : aiStone)) {
+    board[y][x] = 0;
+    return 900000; // 즉시 패배 방어
+  }
+  board[y][x] = 0;
+
+  // 2. 금수 감점
+  if (checkDoubleOpenThree(board, y, x, player) ||
+      checkDoubleOpenFour(board, y, x, player) ||
+      checkOverline(board, y, x, player)) {
+    return -100000;
+  }
+
+  // 3. 패턴별 가중치 및 복수 위협 감지
+  let score = 0;
+  let openThrees = 0, openFours = 0;
+  const directions = [[1,0],[0,1],[1,1],[1,-1]];
+  for (const [dx, dy] of directions) {
+    let count = 1, openEnds = 0;
+    // 정방향
+    for (let i = 1; i <= 4; i++) {
+      const nx = x + dx * i, ny = y + dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === player) count++;
+        else if (board[ny][nx] === 0) { openEnds++; break; }
+        else break;
+      } else break;
+    }
+    // 역방향
+    for (let i = 1; i <= 4; i++) {
+      const nx = x - dx * i, ny = y - dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === player) count++;
+        else if (board[ny][nx] === 0) { openEnds++; break; }
+        else break;
+      } else break;
+    }
+    // 패턴별 점수
+    if (count >= 5) score += 100000;
+    else if (count === 4 && openEnds === 2) { score += 10000; openFours++; }
+    else if (count === 4 && openEnds === 1) score += 2000;
+    else if (count === 3 && openEnds === 2) { score += 1000; openThrees++; }
+    else if (count === 3 && openEnds === 1) score += 200;
+    else if (count === 2 && openEnds === 2) score += 100;
+    else if (count === 2 && openEnds === 1) score += 10;
+  }
+  // 복수 위협(더블 쓰렛)
+  if (openFours >= 2) score += 5000;
+  if (openThrees >= 2) score += 1000;
+
+  // 4. smartEvaluate 점수 추가
+  score += smartEvaluate(board, playerStone, aiStone, player);
+  return score;
 }
 
 export default function Gomoku() {
