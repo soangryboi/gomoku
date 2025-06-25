@@ -7,21 +7,131 @@ const BOARD_PIXEL = (BOARD_SIZE - 1) * CELL_SIZE;
 const STONE_RADIUS = IS_MOBILE ? 20 : 16;
 const CENTER = Math.floor(BOARD_SIZE / 2);
 
-// 난이도 설정
+// 난이도 설정 (AI 모델 모드 추가)
 const DIFFICULTY_LEVELS = [
   { label: 'Easy', depth: 2 },
   { label: 'Normal', depth: 3 },
   { label: 'Hard', depth: 4 },
   { label: 'TINI 모드', depth: 4 },
-  { label: 'TITIBO 모드', depth: 4 }
+  { label: 'TITIBO 모드', depth: 4 },
+  { label: 'AI 모델', depth: 4 } // 새로운 AI 모델 모드
 ];
+
+// AI 모델 로더 클래스
+class AIModelLoader {
+  constructor() {
+    this.model = null;
+    this.isLoaded = false;
+    this.isLoading = false;
+  }
+
+  async loadModel() {
+    if (this.isLoading) return;
+    if (this.isLoaded) return;
+
+    this.isLoading = true;
+    try {
+      // TensorFlow.js가 로드되었는지 확인
+      if (typeof tf === 'undefined') {
+        throw new Error('TensorFlow.js가 로드되지 않았습니다.');
+      }
+
+      // 모델 로드
+      this.model = await tf.loadLayersModel('./web_model/model.json');
+      this.isLoaded = true;
+      console.log('AI 모델 로드 완료');
+    } catch (error) {
+      console.error('AI 모델 로드 실패:', error);
+      this.isLoaded = false;
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  predict(board, currentPlayer) {
+    if (!this.isLoaded || !this.model) {
+      throw new Error('AI 모델이 로드되지 않았습니다.');
+    }
+
+    // 보드 상태를 모델 입력 형식으로 변환
+    const state = this.createModelInput(board, currentPlayer);
+    
+    // 예측
+    const input = tf.tensor4d(state, [1, 3, 15, 15]);
+    const prediction = this.model.predict(input);
+    const policy = prediction.arraySync()[0];
+    
+    // 텐서 정리
+    input.dispose();
+    prediction.dispose();
+    
+    return policy;
+  }
+
+  createModelInput(board, currentPlayer) {
+    // 3채널 입력 생성: [흑돌, 백돌, 현재플레이어]
+    const state = Array.from({ length: 3 }, () => 
+      Array.from({ length: 15 }, () => Array(15).fill(0))
+    );
+
+    // 보드 상태 복사 (15x15로 크롭)
+    for (let y = 0; y < 15; y++) {
+      for (let x = 0; x < 15; x++) {
+        if (board[y][x] === 1) { // 흑돌
+          state[0][y][x] = 1;
+        } else if (board[y][x] === 2) { // 백돌
+          state[1][y][x] = 1;
+        }
+      }
+    }
+
+    // 현재 플레이어 채널
+    if (currentPlayer === 1) {
+      for (let y = 0; y < 15; y++) {
+        for (let x = 0; x < 15; x++) {
+          state[2][y][x] = 1;
+        }
+      }
+    }
+
+    return state;
+  }
+
+  getBestMove(board, currentPlayer, validMoves) {
+    try {
+      const policy = this.predict(board, currentPlayer);
+      
+      // 유효한 수 중에서 가장 높은 확률의 수 선택
+      let bestMove = null;
+      let bestProb = -1;
+
+      for (const [y, x] of validMoves) {
+        if (y < 15 && x < 15) { // 15x15 범위 내에서만
+          const prob = policy[y * 15 + x];
+          if (prob > bestProb) {
+            bestProb = prob;
+            bestMove = [y, x];
+          }
+        }
+      }
+
+      return bestMove || validMoves[0]; // 기본값
+    } catch (error) {
+      console.error('AI 모델 예측 실패:', error);
+      return validMoves[0]; // 기본값
+    }
+  }
+}
+
+// 전역 AI 모델 인스턴스
+const aiModelLoader = new AIModelLoader();
 
 function createEmptyBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
 }
 
-// 메모이제이션된 승리 체크 함수
-const checkWinner = useMemo(() => (board) => {
+// 승리 체크 함수
+function checkWinner(board) {
   const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
   for (let y = 0; y < BOARD_SIZE; y++) {
     for (let x = 0; x < BOARD_SIZE; x++) {
@@ -62,7 +172,7 @@ const checkWinner = useMemo(() => (board) => {
     }
   }
   return 0;
-}, []);
+}
 
 // 패턴 평가 함수 (열린/막힌 가중치 강화)
 function evaluate(board, aiStone, playerStone) {
@@ -876,6 +986,8 @@ export default function Gomoku() {
   const [forbiddenMoves, setForbiddenMoves] = useState([]); // 금수 위치
   const [moveCount, setMoveCount] = useState(0); // 현재 수순
   const [aiResigned, setAiResigned] = useState(false); // AI 기권 상태
+  const [aiModelLoading, setAiModelLoading] = useState(false); // AI 모델 로딩 상태
+  const [aiModelLoaded, setAiModelLoaded] = useState(false); // AI 모델 로드 완료 상태
 
   // 메모이제이션된 금수 위치 계산
   const forbiddenMovesMemo = useMemo(() => {
@@ -929,8 +1041,28 @@ export default function Gomoku() {
     
     let move = null;
     
-    // 최적화된 시뮬레이션 수 (Render 성능 고려)
-    if (difficulty.label === 'TITIBO 모드') {
+    // AI 모델 모드 처리
+    if (difficulty.label === 'AI 모델') {
+      try {
+        // 유효한 수들 찾기
+        const validMoves = [];
+        for (let y = 0; y < BOARD_SIZE; y++) {
+          for (let x = 0; x < BOARD_SIZE; x++) {
+            if (newBoard[y][x] === 0) {
+              validMoves.push([y, x]);
+            }
+          }
+        }
+        
+        if (validMoves.length > 0) {
+          move = aiModelLoader.getBestMove(newBoard, aiStone, validMoves);
+        }
+      } catch (error) {
+        console.error('AI 모델 사용 실패, 기본 AI로 대체:', error);
+        // AI 모델 실패 시 기본 MCTS 사용
+        move = mcts(newBoard, 150, playerStone, aiStone);
+      }
+    } else if (difficulty.label === 'TITIBO 모드') {
       // TITIBO 모드: MCTS + 미니맥스 조합 (300회 시뮬레이션)
       move = mcts(newBoard, 300, playerStone, aiStone);
       if (!move) {
@@ -985,27 +1117,6 @@ export default function Gomoku() {
     const y = (clientY - rect.top) * scaleY;
     return [x, y];
   }, []);
-
-  // 최적화된 키보드 이벤트 핸들러
-  useEffect(() => {
-    if (winner || selecting || selectingDifficulty || aiThinking) return;
-    
-    const handleKeyDown = useCallback((e) => {
-      if (!pendingMove) return;
-      let [y, x] = pendingMove;
-      if (e.key === 'ArrowUp') y = Math.max(0, y - 1);
-      if (e.key === 'ArrowDown') y = Math.min(BOARD_SIZE - 1, y + 1);
-      if (e.key === 'ArrowLeft') x = Math.max(0, x - 1);
-      if (e.key === 'ArrowRight') x = Math.min(BOARD_SIZE - 1, x + 1);
-      if (e.key === 'Enter') handleConfirmMove();
-      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
-        setPendingMove([y, x]);
-      }
-    }, [pendingMove]);
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pendingMove, winner, selecting, selectingDifficulty, aiThinking]);
 
   // 최적화된 착수 확인 함수
   const handleConfirmMove = useCallback(() => {
@@ -1064,6 +1175,27 @@ export default function Gomoku() {
     }
   }, [aiMove, board, difficulty.depth, firstPlayerMove, playerStone, aiStone, turn, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned, checkDoubleOpenThree, checkDoubleOpenFour, checkOverline, winner, turn, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned]);
 
+  // 키보드 이동 핸들러를 useCallback으로 선언
+  const handleKeyDown = useCallback((e) => {
+    if (!pendingMove) return;
+    let [y, x] = pendingMove;
+    if (e.key === 'ArrowUp') y = Math.max(0, y - 1);
+    if (e.key === 'ArrowDown') y = Math.min(BOARD_SIZE - 1, y + 1);
+    if (e.key === 'ArrowLeft') x = Math.max(0, x - 1);
+    if (e.key === 'ArrowRight') x = Math.min(BOARD_SIZE - 1, x + 1);
+    if (e.key === 'Enter') handleConfirmMove();
+    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+      setPendingMove([y, x]);
+    }
+  }, [pendingMove, handleConfirmMove]);
+
+  // 최적화된 키보드 이벤트 핸들러
+  useEffect(() => {
+    if (winner || selecting || selectingDifficulty || aiThinking) return;
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [winner, selecting, selectingDifficulty, aiThinking, handleKeyDown]);
+
   // 최적화된 재시작 함수
   const handleRestart = useCallback(() => {
     setBoard(createEmptyBoard());
@@ -1093,8 +1225,26 @@ export default function Gomoku() {
   }, []);
 
   // 최적화된 난이도 선택 함수
-  const handleSelectDifficulty = useCallback((level) => {
+  const handleSelectDifficulty = useCallback(async (level) => {
     setDifficulty(level);
+    
+    // AI 모델 모드 선택 시 모델 로드
+    if (level.label === 'AI 모델') {
+      setAiModelLoading(true);
+      try {
+        await aiModelLoader.loadModel();
+        setAiModelLoaded(true);
+        console.log('AI 모델 로드 완료');
+      } catch (error) {
+        console.error('AI 모델 로드 실패:', error);
+        alert('AI 모델 로드에 실패했습니다. 다른 난이도를 선택해주세요.');
+        setAiModelLoading(false);
+        return;
+      } finally {
+        setAiModelLoading(false);
+      }
+    }
+    
     setSelectingDifficulty(false);
     
     if (playerStone === 2) {
@@ -1266,13 +1416,34 @@ export default function Gomoku() {
             <button
               key={level.label}
               onClick={() => handleSelectDifficulty(level)}
+              disabled={aiModelLoading && level.label === 'AI 모델'}
               style={{
-                width: IS_MOBILE ? 80 : 120, height: IS_MOBILE ? 35 : 60, margin: IS_MOBILE ? 3 : 10, fontSize: IS_MOBILE ? 10 : 22, borderRadius: 10, border: '2px solid #222', background: '#fff', color: '#222', cursor: 'pointer'
+                width: IS_MOBILE ? 80 : 120, 
+                height: IS_MOBILE ? 35 : 60, 
+                margin: IS_MOBILE ? 3 : 10, 
+                fontSize: IS_MOBILE ? 10 : 22, 
+                borderRadius: 10, 
+                border: '2px solid #222', 
+                background: aiModelLoading && level.label === 'AI 모델' ? '#ccc' : '#fff', 
+                color: aiModelLoading && level.label === 'AI 모델' ? '#666' : '#222', 
+                cursor: aiModelLoading && level.label === 'AI 모델' ? 'not-allowed' : 'pointer'
               }}
             >
-              {level.label === 'Easy' ? 'EASY(이준희실력)' : level.label}
+              {level.label === 'Easy' ? 'EASY(이준희실력)' : 
+               level.label === 'AI 모델' && aiModelLoading ? 'AI 모델 로딩중...' : 
+               level.label}
             </button>
           ))}
+          {aiModelLoading && (
+            <div style={{ 
+              marginTop: 10, 
+              fontSize: IS_MOBILE ? 10 : 14, 
+              color: '#666',
+              fontStyle: 'italic'
+            }}>
+              AI 모델을 로딩하고 있습니다...
+            </div>
+          )}
         </div>
       ) : (
         <div style={boardContainerStyle}>
