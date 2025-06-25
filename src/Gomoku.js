@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 
 const IS_MOBILE = typeof window !== 'undefined' && window.innerWidth < 700;
 const BOARD_SIZE = 16;
@@ -7,21 +7,28 @@ const BOARD_PIXEL = (BOARD_SIZE - 1) * CELL_SIZE;
 const STONE_RADIUS = IS_MOBILE ? 20 : 16;
 const CENTER = Math.floor(BOARD_SIZE / 2);
 
+// 난이도 설정
+const DIFFICULTY_LEVELS = [
+  { label: 'Easy', depth: 2 },
+  { label: 'Normal', depth: 3 },
+  { label: 'Hard', depth: 4 },
+  { label: 'TINI 모드', depth: 4 },
+  { label: 'TITIBO 모드', depth: 4 }
+];
+
 function createEmptyBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
 }
 
-function checkWinner(board) {
-  // 0: 없음, 1: 흑, 2: 백
-  const directions = [
-    [1, 0], [0, 1], [1, 1], [1, -1]
-  ];
+// 메모이제이션된 승리 체크 함수
+const checkWinner = useMemo(() => (board) => {
+  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
   for (let y = 0; y < BOARD_SIZE; y++) {
     for (let x = 0; x < BOARD_SIZE; x++) {
       if (board[y][x] === 0) continue;
       const player = board[y][x];
       for (let [dx, dy] of directions) {
-        let count = 1; // 현재 위치 포함
+        let count = 1;
         // 정방향 확인
         for (let i = 1; i <= 4; i++) {
           const nx = x + dx * i;
@@ -50,13 +57,12 @@ function checkWinner(board) {
             break;
           }
         }
-        // 정확히 5목일 때만 승리
         if (count === 5) return player;
       }
     }
   }
   return 0;
-}
+}, []);
 
 // 패턴 평가 함수 (열린/막힌 가중치 강화)
 function evaluate(board, aiStone, playerStone) {
@@ -199,7 +205,9 @@ function minimax(board, depth, alpha, beta, maximizing, aiStone, playerStone) {
   }
 }
 
-// MCTS Node 클래스
+// 전역 MCTS 트리 캐시 (트리 재사용용)
+let globalMCTSTree = null;
+
 class MCTSNode {
   constructor(board, move = null, parent = null) {
     this.board = board.map(row => row.slice());
@@ -220,7 +228,7 @@ class MCTSNode {
       return [[CENTER, CENTER]];
     }
     
-    // 기존 돌 주변 2칸만 탐색 (수천 배 빠름)
+    // 돌 주변 2칸만 탐색 (수천 배 빠름)
     for (let y = 0; y < BOARD_SIZE; y++) {
       for (let x = 0; x < BOARD_SIZE; x++) {
         if (this.board[y][x] !== 0) {
@@ -264,6 +272,199 @@ class MCTSNode {
     if (this.visits === 0) return Infinity;
     return (this.wins / this.visits) + c * Math.sqrt(Math.log(this.parent.visits) / this.visits);
   }
+
+  // 트리 재사용을 위한 보드 상태 해시
+  getBoardHash() {
+    return this.board.flat().join('');
+  }
+}
+
+// 휴리스틱 rollout (완전 랜덤 대신)
+function heuristicRollout(board, playerStone, aiStone) {
+  const currentBoard = board.map(row => row.slice());
+  let currentPlayer = playerStone;
+  let moveCount = 0;
+  
+  while (moveCount < 50) {
+    const winner = checkWinner(currentBoard);
+    if (winner !== 0) {
+      return winner;
+    }
+    
+    // 유효한 수 찾기
+    const validMoves = [];
+    for (let y = 0; y < BOARD_SIZE; y++) {
+      for (let x = 0; x < BOARD_SIZE; x++) {
+        if (currentBoard[y][x] === 0) {
+          validMoves.push([y, x]);
+        }
+      }
+    }
+    
+    if (validMoves.length === 0) break;
+    
+    // 휴리스틱 기반 수 선택
+    let selectedMove;
+    if (Math.random() < 0.7) { // 70% 확률로 휴리스틱 사용
+      selectedMove = selectHeuristicMove(currentBoard, validMoves, currentPlayer);
+    } else { // 30% 확률로 랜덤
+      selectedMove = validMoves[Math.floor(Math.random() * validMoves.length)];
+    }
+    
+    const [y, x] = selectedMove;
+    currentBoard[y][x] = currentPlayer;
+    currentPlayer = currentPlayer === playerStone ? aiStone : playerStone;
+    moveCount++;
+  }
+  
+  return 0; // 무승부
+}
+
+// 휴리스틱 수 선택
+function selectHeuristicMove(board, validMoves, currentPlayer) {
+  let bestMove = validMoves[0];
+  let bestScore = -Infinity;
+  
+  for (const [y, x] of validMoves) {
+    // 임시로 수를 두고 평가
+    board[y][x] = currentPlayer;
+    const score = evaluateMove(board, y, x, currentPlayer);
+    board[y][x] = 0;
+    
+    if (score > bestScore) {
+      bestScore = score;
+      bestMove = [y, x];
+    }
+  }
+  
+  return bestMove;
+}
+
+// 수 평가 (간단한 휴리스틱)
+function evaluateMove(board, y, x, player) {
+  let score = 0;
+  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  
+  for (const [dx, dy] of directions) {
+    let count = 1;
+    let openEnds = 0;
+    
+    // 정방향 확인
+    for (let i = 1; i <= 4; i++) {
+      const nx = x + dx * i, ny = y + dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === player) count++;
+        else if (board[ny][nx] === 0) {
+          openEnds++;
+          break;
+        } else break;
+      } else break;
+    }
+    
+    // 역방향 확인
+    for (let i = 1; i <= 4; i++) {
+      const nx = x - dx * i, ny = y - dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === player) count++;
+        else if (board[ny][nx] === 0) {
+          openEnds++;
+          break;
+        } else break;
+      } else break;
+    }
+    
+    // 점수 계산
+    if (count >= 5) score += 10000;
+    else if (count === 4 && openEnds >= 1) score += 1000;
+    else if (count === 3 && openEnds >= 1) score += 100;
+    else if (count === 2 && openEnds >= 1) score += 10;
+  }
+  
+  return score;
+}
+
+// 트리 재사용을 위한 re-root 함수
+function reRootTree(oldRoot, newBoard) {
+  if (!oldRoot) return new MCTSNode(newBoard);
+  
+  // 새로운 보드와 일치하는 자식 찾기
+  for (const child of oldRoot.children) {
+    if (child.getBoardHash() === newBoard.flat().join('')) {
+      // 트리 재구성
+      child.parent = null;
+      return child;
+    }
+  }
+  
+  // 일치하는 자식이 없으면 새 트리 생성
+  return new MCTSNode(newBoard);
+}
+
+// 최적화된 MCTS 알고리즘
+function mcts(board, iterations = 200, playerStone, aiStone) {
+  // 트리 재사용
+  const root = reRootTree(globalMCTSTree, board);
+  
+  for (let i = 0; i < iterations; i++) {
+    let node = root;
+    
+    // Selection
+    while (node.isTerminal() && node.children.length > 0) {
+      node = selectChild(node);
+    }
+    
+    // Expansion
+    if (!node.isTerminal()) {
+      const move = node.untriedMoves[Math.floor(Math.random() * node.untriedMoves.length)];
+      const newBoard = node.board.map(row => row.slice());
+      newBoard[move[0]][move[1]] = node.children.length % 2 === 0 ? playerStone : aiStone;
+      const child = new MCTSNode(newBoard, move, node);
+      node.children.push(child);
+      node = child;
+    }
+    
+    // Simulation (휴리스틱 rollout)
+    const result = heuristicRollout(node.board, playerStone, aiStone);
+    
+    // Backpropagation
+    while (node !== null) {
+      node.visits++;
+      if (result === aiStone) {
+        node.wins++;
+      }
+      node = node.parent;
+    }
+  }
+  
+  // Best move 선택
+  let bestChild = root.children[0];
+  for (const child of root.children) {
+    if (child.visits > bestChild.visits) {
+      bestChild = child;
+    }
+  }
+  
+  // 트리 캐시 업데이트
+  globalMCTSTree = root;
+  
+  return bestChild ? bestChild.move : null;
+}
+
+// Selection 단계
+function selectChild(node) {
+  const c = Math.sqrt(2);
+  let bestChild = node.children[0];
+  let bestUCB = bestChild.getUCB1(c);
+  
+  for (const child of node.children) {
+    const ucb = child.getUCB1(c);
+    if (ucb > bestUCB) {
+      bestUCB = ucb;
+      bestChild = child;
+    }
+  }
+  
+  return bestChild;
 }
 
 // 간단한 평가 함수 (시뮬레이션용)
@@ -309,70 +510,133 @@ function simpleEvaluate(board, playerStone, aiStone) {
   return score;
 }
 
-// MCTS 알고리즘
-function mcts(board, iterations = 1000, playerStone, aiStone) {
-  const root = new MCTSNode(board);
+// 똑똑한 평가 함수 (시뮬레이션용)
+function smartEvaluate(board, playerStone, aiStone, currentPlayer) {
+  let score = 0;
+  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
   
-  for (let i = 0; i < iterations; i++) {
-    let node = root;
-    
-    // Selection
-    while (node.isTerminal() && node.children.length > 0) {
-      node = selectChild(node);
-    }
-    
-    // Expansion
-    if (!node.isTerminal()) {
-      const move = node.untriedMoves[Math.floor(Math.random() * node.untriedMoves.length)];
-      const newBoard = node.board.map(row => row.slice());
-      newBoard[move[0]][move[1]] = node.children.length % 2 === 0 ? playerStone : aiStone;
-      const child = new MCTSNode(newBoard, move, node);
-      node.children.push(child);
-      node = child;
-    }
-    
-    // Simulation (semi-random)
-    const result = simulate(node.board, playerStone, aiStone);
-    
-    // Backpropagation
-    while (node !== null) {
-      node.visits++;
-      if (result === aiStone) {
-        node.wins++;
+  for (let y = 0; y < BOARD_SIZE; y++) {
+    for (let x = 0; x < BOARD_SIZE; x++) {
+      if (board[y][x] === 0) continue;
+      const stone = board[y][x];
+      
+      for (let [dx, dy] of directions) {
+        let count = 1;
+        let openEnds = 0;
+        
+        // 정방향 확인
+        for (let i = 1; i <= 4; i++) {
+          const nx = x + dx * i, ny = y + dy * i;
+          if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+            if (board[ny][nx] === stone) count++;
+            else if (board[ny][nx] === 0) {
+              openEnds++;
+              break;
+            } else break;
+          } else break;
+        }
+        
+        // 역방향 확인
+        for (let i = 1; i <= 4; i++) {
+          const nx = x - dx * i, ny = y - dy * i;
+          if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+            if (board[ny][nx] === stone) count++;
+            else if (board[ny][nx] === 0) {
+              openEnds++;
+              break;
+            } else break;
+          } else break;
+        }
+        
+        // 점수 계산 (열린/막힌 구분)
+        const isOpen = openEnds === 2;
+        const isBlocked = openEnds === 0;
+        const isSemiOpen = openEnds === 1;
+        
+        if (stone === currentPlayer) {
+          if (count >= 5) score += 10000; // 승리
+          else if (count === 4) {
+            if (isOpen) score += 5000; // 열린 4
+            else if (isSemiOpen) score += 1000; // 막힌 4
+          }
+          else if (count === 3) {
+            if (isOpen) score += 500; // 열린 3
+            else if (isSemiOpen) score += 100; // 막힌 3
+          }
+          else if (count === 2) {
+            if (isOpen) score += 50; // 열린 2
+            else if (isSemiOpen) score += 10; // 막힌 2
+          }
+        } else {
+          // 상대방 수는 방어 차원에서 고려
+          if (count >= 5) score -= 10000;
+          else if (count === 4) {
+            if (isOpen) score -= 5000;
+            else if (isSemiOpen) score -= 1000;
+          }
+          else if (count === 3) {
+            if (isOpen) score -= 500;
+            else if (isSemiOpen) score -= 100;
+          }
+          else if (count === 2) {
+            if (isOpen) score -= 50;
+            else if (isSemiOpen) score -= 10;
+          }
+        }
       }
-      node = node.parent;
     }
   }
   
-  // Best move 선택
-  let bestChild = root.children[0];
-  for (const child of root.children) {
-    if (child.visits > bestChild.visits) {
-      bestChild = child;
-    }
-  }
-  
-  return bestChild ? bestChild.move : null;
+  return score;
 }
 
-// Selection 단계
-function selectChild(node) {
-  const c = Math.sqrt(2);
-  let bestChild = node.children[0];
-  let bestUCB = bestChild.getUCB1(c);
+// 똑똑한 수 선택 함수
+function smartMoveSelection(validMoves, board, currentPlayer, playerStone, aiStone) {
+  const moveScores = [];
   
-  for (const child of node.children) {
-    const ucb = child.getUCB1(c);
-    if (ucb > bestUCB) {
-      bestUCB = ucb;
-      bestChild = child;
+  for (const move of validMoves) {
+    const testBoard = board.map(row => row.slice());
+    testBoard[move[0]][move[1]] = currentPlayer;
+    
+    let score = smartEvaluate(testBoard, playerStone, aiStone, currentPlayer);
+    
+    // 금수 체크 (페널티)
+    if (checkDoubleOpenThree(testBoard, move[0], move[1], currentPlayer)) {
+      score -= 10000; // 3-3 금수
     }
+    if (checkDoubleOpenFour(testBoard, move[0], move[1], currentPlayer)) {
+      score -= 10000; // 4-4 금수
+    }
+    if (checkOverline(testBoard, move[0], move[1], currentPlayer)) {
+      score -= 10000; // 장목
+    }
+    
+    // 승리 조건 체크 (보너스)
+    if (checkWinner(testBoard) === currentPlayer) {
+      score += 50000; // 즉시 승리
+    }
+    
+    // 상대방 승리 방지 (보너스)
+    const opponentBoard = board.map(row => row.slice());
+    opponentBoard[move[0]][move[1]] = currentPlayer === playerStone ? aiStone : playerStone;
+    if (checkWinner(opponentBoard) === (currentPlayer === playerStone ? aiStone : playerStone)) {
+      score += 30000; // 상대방 승리 방지
+    }
+    
+    moveScores.push({ move, score });
   }
   
-  return bestChild;
+  // 점수 순으로 정렬
+  moveScores.sort((a, b) => b.score - a.score);
+  
+  // 상위 30% 중에서 랜덤 선택 (탐색과 활용의 균형)
+  const topCount = Math.max(1, Math.floor(moveScores.length * 0.3));
+  const topMoves = moveScores.slice(0, topCount);
+  
+  return topMoves[Math.floor(Math.random() * topMoves.length)].move;
 }
 
-// Simulation 단계 (semi-random)
+// Simulation 단계 (똑똑한 랜덤)
 function simulate(board, playerStone, aiStone) {
   const simBoard = board.map(row => row.slice());
   let currentPlayer = playerStone;
@@ -394,22 +658,8 @@ function simulate(board, playerStone, aiStone) {
     
     if (validMoves.length === 0) return 0; // 무승부
     
-    // semi-random: 70% 확률로 평가 함수 사용, 30% 확률로 랜덤
-    let bestMove = validMoves[0];
-    if (Math.random() < 0.7 && validMoves.length > 1) {
-      let bestScore = -Infinity;
-      for (const move of validMoves) {
-        const testBoard = simBoard.map(row => row.slice());
-        testBoard[move[0]][move[1]] = currentPlayer;
-        const score = simpleEvaluate(testBoard, playerStone, aiStone);
-        if (score > bestScore) {
-          bestScore = score;
-          bestMove = move;
-        }
-      }
-    } else {
-      bestMove = validMoves[Math.floor(Math.random() * validMoves.length)];
-    }
+    // 똑똑한 수 선택
+    const bestMove = smartMoveSelection(validMoves, simBoard, currentPlayer, playerStone, aiStone);
     
     simBoard[bestMove[0]][bestMove[1]] = currentPlayer;
     currentPlayer = currentPlayer === playerStone ? aiStone : playerStone;
@@ -417,17 +667,9 @@ function simulate(board, playerStone, aiStone) {
   }
   
   // 최대 이동 수에 도달하면 평가 함수로 승자 결정
-  const finalScore = simpleEvaluate(simBoard, playerStone, aiStone);
+  const finalScore = smartEvaluate(simBoard, playerStone, aiStone, aiStone);
   return finalScore > 0 ? aiStone : finalScore < 0 ? playerStone : 0;
 }
-
-const DIFFICULTY_LEVELS = [
-  { label: 'Easy', depth: 1 },
-  { label: 'Normal', depth: 2 },
-  { label: 'Hard', depth: 3 },
-  { label: 'TINI 모드', depth: 4 },
-  { label: 'TITIBO 모드', depth: 5 },
-];
 
 function getAdjacentEmpty(board, y, x) {
   const dirs = [
@@ -635,6 +877,18 @@ export default function Gomoku() {
   const [moveCount, setMoveCount] = useState(0); // 현재 수순
   const [aiResigned, setAiResigned] = useState(false); // AI 기권 상태
 
+  // 메모이제이션된 금수 위치 계산
+  const forbiddenMovesMemo = useMemo(() => {
+    if (selecting || selectingDifficulty || winner) return [];
+    return findForbiddenMoves(board, playerStone);
+  }, [board, playerStone, selecting, selectingDifficulty, winner]);
+
+  // 메모이제이션된 수순 계산
+  const moveCountMemo = useMemo(() => {
+    if (selecting || selectingDifficulty) return 0;
+    return board.flat().filter(cell => cell !== 0).length;
+  }, [board, selecting, selectingDifficulty]);
+
   // 스크롤 위치 유지
   React.useEffect(() => {
     if (IS_MOBILE && !selecting && !selectingDifficulty) {
@@ -645,33 +899,26 @@ export default function Gomoku() {
     }
   }, [board, turn, aiThinking]);
 
-  // 환영 메시지 3초 후 자동 숨김
-  React.useEffect(() => {
+  // 환영 메시지 자동 숨김
+  useEffect(() => {
     if (showWelcome) {
-      const timer = setTimeout(() => {
-        setShowWelcome(false);
-      }, 3000);
+      const timer = setTimeout(() => setShowWelcome(false), 3000);
       return () => clearTimeout(timer);
     }
   }, [showWelcome]);
 
   // 금수 위치 업데이트
-  React.useEffect(() => {
-    if (!selecting && !selectingDifficulty && !winner) {
-      const forbidden = findForbiddenMoves(board, playerStone);
-      setForbiddenMoves(forbidden);
-    }
-  }, [board, playerStone, selecting, selectingDifficulty, winner]);
+  useEffect(() => {
+    setForbiddenMoves(forbiddenMovesMemo);
+  }, [forbiddenMovesMemo]);
 
-  // 현재 수순 계산
-  React.useEffect(() => {
-    if (!selecting && !selectingDifficulty) {
-      const totalStones = board.flat().filter(cell => cell !== 0).length;
-      setMoveCount(totalStones);
-    }
-  }, [board, selecting, selectingDifficulty]);
+  // 수순 업데이트
+  useEffect(() => {
+    setMoveCount(moveCountMemo);
+  }, [moveCountMemo]);
 
-  function aiMove(newBoard, aiStone, playerStone, depth, firstPlayerMove) {
+  // 최적화된 AI 이동 함수
+  const aiMove = useCallback((newBoard, aiStone, playerStone, depth, firstPlayerMove) => {
     if (newBoard.flat().every(cell => cell === 0)) {
       return [CENTER, CENTER];
     }
@@ -680,49 +927,47 @@ export default function Gomoku() {
       return adjacent || [CENTER, CENTER];
     }
     
-    // 난이도에 따라 알고리즘 선택
     let move = null;
     
+    // 최적화된 시뮬레이션 수 (Render 성능 고려)
     if (difficulty.label === 'TITIBO 모드') {
-      // TITIBO 모드: MCTS + 미니맥스 조합 (3000회 시뮬레이션)
-      move = mcts(newBoard, 3000, playerStone, aiStone);
+      // TITIBO 모드: MCTS + 미니맥스 조합 (300회 시뮬레이션)
+      move = mcts(newBoard, 300, playerStone, aiStone);
       if (!move) {
         const [, minimaxMove] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
         move = minimaxMove;
       }
     } else if (difficulty.label === 'TINI 모드') {
-      // TINI 모드: MCTS (2000회 시뮬레이션)
-      move = mcts(newBoard, 2000, playerStone, aiStone);
+      // TINI 모드: MCTS (200회 시뮬레이션)
+      move = mcts(newBoard, 200, playerStone, aiStone);
     } else if (difficulty.label === 'Hard') {
-      // Hard 모드: MCTS (1000회 시뮬레이션)
-      move = mcts(newBoard, 1000, playerStone, aiStone);
+      // Hard 모드: MCTS (150회 시뮬레이션)
+      move = mcts(newBoard, 150, playerStone, aiStone);
     } else {
-      // Easy/Normal 모드: 미니맥스
+      // Easy/Normal 모드: 미니맥스 (빠름)
       const [, minimaxMove] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
       move = minimaxMove;
     }
     
-    // move가 null이면 안전한 기본값 반환
     if (!move) {
-      // 빈 칸 중 하나를 찾아서 반환
       for (let y = 0; y < BOARD_SIZE; y++) {
         for (let x = 0; x < BOARD_SIZE; x++) {
           if (newBoard[y][x] === 0) return [y, x];
         }
       }
-      return [CENTER, CENTER]; // 최후의 수단
+      return [CENTER, CENTER];
     }
     
-    // AI가 이길 수 없는 상황인지 확인 (평가 점수가 매우 낮으면)
     const [evalScore] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
-    if (evalScore < -50000) { // 매우 불리한 상황
-      return null; // 기권 신호
+    if (evalScore < -50000) {
+      return null;
     }
     
     return move;
-  }
+  }, [difficulty.label]);
 
-  function getSvgCoords(e) {
+  // 최적화된 SVG 좌표 계산
+  const getSvgCoords = useCallback((e) => {
     let clientX, clientY;
     if (e.touches && e.touches.length > 0) {
       clientX = e.touches[0].clientX;
@@ -733,19 +978,19 @@ export default function Gomoku() {
     }
     const svg = e.target.closest('svg');
     const rect = svg.getBoundingClientRect();
-    // viewBox와 실제 렌더링 크기 비율을 정확히 반영
     const viewBox = svg.viewBox.baseVal;
     const scaleX = viewBox.width / rect.width;
     const scaleY = viewBox.height / rect.height;
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
     return [x, y];
-  }
+  }, []);
 
-  // 방향키로 임시 돌 이동 (돌이 있어도 이동 가능)
+  // 최적화된 키보드 이벤트 핸들러
   useEffect(() => {
     if (winner || selecting || selectingDifficulty || aiThinking) return;
-    const handleKeyDown = (e) => {
+    
+    const handleKeyDown = useCallback((e) => {
       if (!pendingMove) return;
       let [y, x] = pendingMove;
       if (e.key === 'ArrowUp') y = Math.max(0, y - 1);
@@ -756,62 +1001,28 @@ export default function Gomoku() {
       if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
         setPendingMove([y, x]);
       }
-    };
+    }, [pendingMove]);
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [pendingMove, winner, selecting, selectingDifficulty, aiThinking]);
 
-  // 클릭 시 중앙에서 임시 돌 시작 (삭제)
-  function handleClickBoard(e) {
-    // 아무 동작 없음
-    return;
-  }
-
-  // 모바일용 이동 버튼 (돌이 있어도 이동 가능)
-  function renderMoveButtons() {
-    if (!IS_MOBILE || !pendingMove || winner || aiThinking) return null;
-    const [y, x] = pendingMove;
-    const move = (dy, dx) => {
-      const ny = Math.max(0, Math.min(BOARD_SIZE - 1, y + dy));
-      const nx = Math.max(0, Math.min(BOARD_SIZE - 1, x + dx));
-      setPendingMove([ny, nx]);
-    };
-    return (
-      <div style={{ marginTop: 5, marginBottom: 5 }}>
-        <div style={{ textAlign: 'center', marginBottom: 5 }}>
-          <button onClick={() => move(-1, 0)} style={{ width: 45, height: 45, fontSize: 20, margin: 2 }}>↑</button>
-        </div>
-        <div style={{ textAlign: 'center', marginBottom: 5 }}>
-          <button onClick={() => move(0, -1)} style={{ width: 45, height: 45, fontSize: 20, margin: 2 }}>←</button>
-          <button onClick={() => move(1, 0)} style={{ width: 45, height: 45, fontSize: 20, margin: 2 }}>↓</button>
-          <button onClick={() => move(0, 1)} style={{ width: 45, height: 45, fontSize: 20, margin: 2 }}>→</button>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <button onClick={handleConfirmMove} style={{ width: 100, height: 35, fontSize: 16, background: '#222', color: '#fff', borderRadius: 5 }}>확인</button>
-        </div>
-      </div>
-    );
-  }
-
-  // 착수(확인/Enter) 시에만 빈 칸인지 검사
-  function handleConfirmMove() {
+  // 최적화된 착수 확인 함수
+  const handleConfirmMove = useCallback(() => {
     if (!pendingMove || winner || aiThinking) return;
     const [y, x] = pendingMove;
-    if (board[y][x] !== 0) return; // 빈 칸이 아니면 착수 불가
+    if (board[y][x] !== 0) return;
     
-    // 3-3 금수 체크
     if (checkDoubleOpenThree(board, y, x, playerStone)) {
       alert('3-3 금수입니다! 다른 위치에 두세요.');
       return;
     }
     
-    // 4-4 금수 체크
     if (checkDoubleOpenFour(board, y, x, playerStone)) {
       alert('4-4 금수입니다! 다른 위치에 두세요.');
       return;
     }
     
-    // 장목 체크
     if (checkOverline(board, y, x, playerStone)) {
       alert('6목 이상 장목입니다! 다른 위치에 두세요.');
       return;
@@ -851,53 +1062,56 @@ export default function Gomoku() {
         setAiThinking(false);
       }, 10);
     }
-  }
+  }, [aiMove, board, difficulty.depth, firstPlayerMove, playerStone, aiStone, turn, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned, checkDoubleOpenThree, checkDoubleOpenFour, checkOverline, winner, turn, setTurn, setWinner, setBoard, setLastMove, setFirstPlayerMove, setPendingMove, setAiResigned]);
 
-  function handleRestart() {
+  // 최적화된 재시작 함수
+  const handleRestart = useCallback(() => {
     setBoard(createEmptyBoard());
     setTurn(1);
     setWinner(0);
     setLastMove(null);
     setSelecting(true);
     setSelectingDifficulty(false);
-    setPlayerStone(1);
-    setAiStone(2);
-    setDifficulty(DIFFICULTY_LEVELS[1]);
     setFirstPlayerMove(null);
+    setAiThinking(false);
+    setPendingMove(null);
+    setForbiddenMoves([]);
     setMoveCount(0);
     setAiResigned(false);
-  }
+    
+    // MCTS 트리 캐시 초기화 (메모리 관리)
+    globalMCTSTree = null;
+  }, []);
 
-  function handleSelectStone(stone) {
+  // 최적화된 돌 선택 함수
+  const handleSelectStone = useCallback((stone) => {
     setPlayerStone(stone);
     setAiStone(stone === 1 ? 2 : 1);
-    setTurn(1); // 흑부터 시작
     setSelecting(false);
     setSelectingDifficulty(true);
     setFirstPlayerMove(null);
-  }
+  }, []);
 
-  function handleSelectDifficulty(level) {
+  // 최적화된 난이도 선택 함수
+  const handleSelectDifficulty = useCallback((level) => {
     setDifficulty(level);
     setSelectingDifficulty(false);
-    // AI가 선공(흑)일 때 중앙에 자동으로 두기
+    
     if (playerStone === 2) {
       const newBoard = createEmptyBoard();
       newBoard[CENTER][CENTER] = 1;
       setBoard(newBoard);
       setLastMove([CENTER, CENTER]);
-      setTurn(2); // 백(플레이어) 차례
+      setTurn(2);
       setFirstPlayerMove(null);
-      // 플레이어 차례일 때 중앙에서 임시 돌 시작
       setPendingMove([CENTER, CENTER]);
     } else {
-      // 플레이어가 선공(흑)일 때 중앙에서 임시 돌 시작
       setPendingMove([CENTER, CENTER]);
     }
-  }
+  }, [playerStone]);
 
-  // 모바일 대응: SVG와 버튼에 터치 이벤트 추가, 반응형 스타일 적용
-  const boardContainerStyle = {
+  // 메모이제이션된 스타일 객체들
+  const boardContainerStyle = useMemo(() => ({
     display: 'inline-block',
     background: '#deb887',
     padding: IS_MOBILE ? 10 : 20,
@@ -906,14 +1120,14 @@ export default function Gomoku() {
     maxWidth: '100vw',
     overflowX: 'auto',
     touchAction: 'manipulation',
-    // 모바일에서 불필요한 빈 공간 제거
     ...(IS_MOBILE && { 
       height: 'fit-content',
       margin: '10px auto',
       paddingBottom: 5
     }),
-  };
-  const svgStyle = {
+  }), []);
+
+  const svgStyle = useMemo(() => ({
     background: '#deb887',
     cursor: winner ? 'default' : 'pointer',
     minWidth: 320,
@@ -921,12 +1135,88 @@ export default function Gomoku() {
     width: '100vw',
     height: BOARD_PIXEL + 1,
     display: 'block',
-    // 모바일에서 SVG 크기 최적화
     ...(IS_MOBILE && {
       maxWidth: '90vw',
       width: '90vw',
     }),
-  };
+  }), [winner]);
+
+  // 메모이제이션된 격자 렌더링
+  const gridLines = useMemo(() => 
+    Array.from({ length: BOARD_SIZE }).map((_, i) => (
+      <g key={i}>
+        <line
+          x1={i * CELL_SIZE}
+          y1={0}
+          x2={i * CELL_SIZE}
+          y2={BOARD_PIXEL}
+          stroke="#333"
+          strokeWidth={1}
+        />
+        <line
+          x1={0}
+          y1={i * CELL_SIZE}
+          x2={BOARD_PIXEL}
+          y2={i * CELL_SIZE}
+          stroke="#333"
+          strokeWidth={1}
+        />
+      </g>
+    )), []);
+
+  // 메모이제이션된 돌 렌더링
+  const stones = useMemo(() => 
+    board.map((row, y) =>
+      row.map((cell, x) =>
+        cell !== 0 ? (
+          <circle
+            key={`stone-${x}-${y}`}
+            cx={x * CELL_SIZE}
+            cy={y * CELL_SIZE}
+            r={STONE_RADIUS}
+            fill={cell === 1 ? '#222' : '#fff'}
+            stroke={lastMove && lastMove[0] === y && lastMove[1] === x ? 'red' : cell === 2 ? '#aaa' : 'none'}
+            strokeWidth={lastMove && lastMove[0] === y && lastMove[1] === x ? 3 : 2}
+          />
+        ) : null
+      )
+    ), [board, lastMove]);
+
+  // 메모이제이션된 금수 표시
+  const forbiddenMarks = useMemo(() => 
+    forbiddenMoves.map(([fy, fx, type]) => (
+      <g key={`forbidden-${fy}-${fx}`}>
+        <line
+          x1={fx * CELL_SIZE - 8}
+          y1={fy * CELL_SIZE - 8}
+          x2={fx * CELL_SIZE + 8}
+          y2={fy * CELL_SIZE + 8}
+          stroke={type === '3-3' ? 'red' : type === '4-4' ? 'orange' : 'purple'}
+          strokeWidth={2}
+        />
+        <line
+          x1={fx * CELL_SIZE + 8}
+          y1={fy * CELL_SIZE - 8}
+          x2={fx * CELL_SIZE - 8}
+          y2={fy * CELL_SIZE + 8}
+          stroke={type === '3-3' ? 'red' : type === '4-4' ? 'orange' : 'purple'}
+          strokeWidth={2}
+        />
+      </g>
+    )), [forbiddenMoves]);
+
+  // 메모이제이션된 임시 돌 표시
+  const pendingStone = useMemo(() => 
+    pendingMove && !winner && !aiThinking ? (
+      <circle
+        cx={pendingMove[1] * CELL_SIZE}
+        cy={pendingMove[0] * CELL_SIZE}
+        r={STONE_RADIUS - 2}
+        fill="rgba(255, 0, 0, 0.3)"
+        stroke="red"
+        strokeWidth={1}
+      />
+    ) : null, [pendingMove, winner, aiThinking]);
 
   return (
     <div className="game-container" style={{ textAlign: 'center', marginTop: IS_MOBILE ? 5 : 30 }}>
@@ -1003,82 +1293,14 @@ export default function Gomoku() {
             height={BOARD_PIXEL + 1}
             viewBox={`0 0 ${BOARD_PIXEL + 1} ${BOARD_PIXEL + 1}`}
             style={svgStyle}
-            onClick={handleClickBoard}
-            onTouchStart={handleClickBoard}
+            onClick={getSvgCoords}
+            onTouchStart={getSvgCoords}
             tabIndex={0}
           >
-            {/* 격자판 */}
-            {Array.from({ length: BOARD_SIZE }).map((_, i) => (
-              <g key={i}>
-                {/* 세로선 */}
-                <line
-                  x1={i * CELL_SIZE}
-                  y1={0}
-                  x2={i * CELL_SIZE}
-                  y2={BOARD_PIXEL}
-                  stroke="#333"
-                  strokeWidth={1}
-                />
-                {/* 가로선 */}
-                <line
-                  x1={0}
-                  y1={i * CELL_SIZE}
-                  x2={BOARD_PIXEL}
-                  y2={i * CELL_SIZE}
-                  stroke="#333"
-                  strokeWidth={1}
-                />
-              </g>
-            ))}
-            {/* 돌 */}
-            {board.map((row, y) =>
-              row.map((cell, x) =>
-                cell !== 0 ? (
-                  <circle
-                    key={x + '-' + y}
-                    cx={x * CELL_SIZE}
-                    cy={y * CELL_SIZE}
-                    r={STONE_RADIUS}
-                    fill={cell === 1 ? '#222' : '#fff'}
-                    stroke={lastMove && lastMove[0] === y && lastMove[1] === x ? 'red' : cell === 2 ? '#aaa' : 'none'}
-                    strokeWidth={lastMove && lastMove[0] === y && lastMove[1] === x ? 3 : 2}
-                  />
-                ) : null
-              )
-            )}
-            {/* 금수 위치 X표시 */}
-            {forbiddenMoves.map(([fy, fx, type]) => (
-              <g key={`forbidden-${fy}-${fx}`}>
-                <line
-                  x1={fx * CELL_SIZE - 8}
-                  y1={fy * CELL_SIZE - 8}
-                  x2={fx * CELL_SIZE + 8}
-                  y2={fy * CELL_SIZE + 8}
-                  stroke={type === '3-3' ? 'red' : type === '4-4' ? 'orange' : 'purple'}
-                  strokeWidth={2}
-                />
-                <line
-                  x1={fx * CELL_SIZE + 8}
-                  y1={fy * CELL_SIZE - 8}
-                  x2={fx * CELL_SIZE - 8}
-                  y2={fy * CELL_SIZE + 8}
-                  stroke={type === '3-3' ? 'red' : type === '4-4' ? 'orange' : 'purple'}
-                  strokeWidth={2}
-                />
-              </g>
-            ))}
-            {/* 임시 착수 위치 표시 */}
-            {pendingMove && !winner && !aiThinking && (
-              <circle
-                cx={pendingMove[1] * CELL_SIZE}
-                cy={pendingMove[0] * CELL_SIZE}
-                r={STONE_RADIUS - 2}
-                fill={turn === 1 ? '#222' : '#fff'}
-                fillOpacity={0.5}
-                stroke="blue"
-                strokeWidth={2}
-              />
-            )}
+            {gridLines}
+            {stones}
+            {forbiddenMarks}
+            {pendingStone}
           </svg>
           {/* 확인 버튼 및 모바일 이동 버튼 */}
           {pendingMove && !winner && !aiThinking && !IS_MOBILE && (
@@ -1089,7 +1311,6 @@ export default function Gomoku() {
               확인 (Enter)
             </button>
           )}
-          {renderMoveButtons()}
           <div style={{ marginTop: IS_MOBILE ? 3 : 20 }}>
             {winner
               ? <h3 style={

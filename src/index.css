@@ -5,6 +5,9 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  overflow-x: hidden;
 }
 
 code {
@@ -12,11 +15,70 @@ code {
     monospace;
 }
 
+/* 성능 최적화를 위한 CSS */
+.game-container {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* 애니메이션 */
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+}
+
 @keyframes glow {
-  from {
-    text-shadow: 3px 3px 6px rgba(0,0,0,0.5), 0 0 10px #ffd700, 0 0 20px #ffd700;
+  from { text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #ffd700, 0 0 20px #ffd700; }
+  to { text-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #ffd700, 0 0 40px #ffd700; }
+}
+
+/* 모바일 최적화 */
+@media (max-width: 700px) {
+  body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    overflow-x: hidden;
+    overflow-y: auto;
   }
-  to {
-    text-shadow: 3px 3px 6px rgba(0,0,0,0.5), 0 0 20px #ffd700, 0 0 30px #ffd700, 0 0 40px #ffd700;
+  
+  .game-container {
+    padding: 0;
+    margin: 0;
   }
+}
+
+/* 성능 최적화 */
+* {
+  box-sizing: border-box;
+}
+
+button {
+  transition: all 0.2s ease;
+  will-change: transform;
+}
+
+button:hover {
+  transform: translateY(-2px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+/* SVG 최적화 */
+svg {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* 스크롤 최적화 */
+html {
+  scroll-behavior: smooth;
+}
+
+/* 터치 최적화 */
+* {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
