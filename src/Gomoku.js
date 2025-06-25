@@ -289,6 +289,7 @@ export default function Gomoku() {
   const [pendingMove, setPendingMove] = useState(null); // 임시 착수 위치
   const [showWelcome, setShowWelcome] = useState(true); // 환영 메시지 표시
   const [forbiddenMoves, setForbiddenMoves] = useState([]); // 금수 위치
+  const [moveCount, setMoveCount] = useState(0); // 현재 수순
 
   // 환영 메시지 3초 후 자동 숨김
   React.useEffect(() => {
@@ -307,6 +308,14 @@ export default function Gomoku() {
       setForbiddenMoves(forbidden);
     }
   }, [board, playerStone, selecting, selectingDifficulty, winner]);
+
+  // 현재 수순 계산
+  React.useEffect(() => {
+    if (!selecting && !selectingDifficulty) {
+      const totalStones = board.flat().filter(cell => cell !== 0).length;
+      setMoveCount(totalStones);
+    }
+  }, [board, selecting, selectingDifficulty]);
 
   function aiMove(newBoard, aiStone, playerStone, depth, firstPlayerMove) {
     if (newBoard.flat().every(cell => cell === 0)) {
@@ -456,6 +465,7 @@ export default function Gomoku() {
     setAiStone(2);
     setDifficulty(DIFFICULTY_LEVELS[1]);
     setFirstPlayerMove(null);
+    setMoveCount(0);
   }
 
   function handleSelectStone(stone) {
@@ -577,6 +587,17 @@ export default function Gomoku() {
       ) : (
         <div style={boardContainerStyle}>
           {aiThinking && <div style={{ color: 'red', fontWeight: 'bold', margin: IS_MOBILE ? 2 : 10, fontSize: IS_MOBILE ? 10 : 14 }}>AI 생각 중...</div>}
+          {/* 현재 수순 표시 */}
+          {!selecting && !selectingDifficulty && (
+            <div style={{ 
+              marginBottom: IS_MOBILE ? 5 : 10, 
+              fontSize: IS_MOBILE ? 12 : 16, 
+              fontWeight: 'bold',
+              color: '#333'
+            }}>
+              {moveCount}수째
+            </div>
+          )}
           <svg
             width={IS_MOBILE ? "85vw" : "100vw"}
             height={BOARD_PIXEL + 1}
