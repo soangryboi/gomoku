@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const IS_MOBILE = typeof window !== 'undefined' && window.innerWidth < 700;
 const BOARD_SIZE = 16;
@@ -245,16 +245,45 @@ export default function Gomoku() {
     return [x, y];
   }
 
+  // 방향키로 임시 돌 이동
+  useEffect(() => {
+    if (winner || selecting || selectingDifficulty || aiThinking) return;
+    const handleKeyDown = (e) => {
+      if (!pendingMove) return;
+      let [y, x] = pendingMove;
+      if (e.key === 'ArrowUp') y = Math.max(0, y - 1);
+      if (e.key === 'ArrowDown') y = Math.min(BOARD_SIZE - 1, y + 1);
+      if (e.key === 'ArrowLeft') x = Math.max(0, x - 1);
+      if (e.key === 'ArrowRight') x = Math.min(BOARD_SIZE - 1, x + 1);
+      if (e.key === 'Enter') handleConfirmMove();
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+        if (board[y][x] === 0) setPendingMove([y, x]);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingMove, winner, selecting, selectingDifficulty, aiThinking, board]);
+
+  // 클릭 시 중앙에서 임시 돌 시작
   function handleClickBoard(e) {
     if (winner || selecting || selectingDifficulty || aiThinking) return;
-    const [offsetX, offsetY] = getSvgCoords(e);
-    // 격자 교차점에 가장 가깝게 보정
-    const x = Math.round(offsetX / CELL_SIZE);
-    const y = Math.round(offsetY / CELL_SIZE);
-    if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE) return;
-    if (board[y][x] !== 0) return;
-    if (turn !== playerStone) return;
-    setPendingMove([y, x]); // 임시 착수 위치만 표시
+    const center = Math.floor(BOARD_SIZE / 2);
+    if (board[center][center] !== 0) {
+      // 중앙이 이미 차있으면, 가장 가까운 빈칸 탐색
+      for (let d = 1; d < BOARD_SIZE; d++) {
+        for (let dy = -d; dy <= d; dy++) {
+          for (let dx = -d; dx <= d; dx++) {
+            const y = center + dy, x = center + dx;
+            if (y >= 0 && y < BOARD_SIZE && x >= 0 && x < BOARD_SIZE && board[y][x] === 0) {
+              setPendingMove([y, x]);
+              return;
+            }
+          }
+        }
+      }
+    } else {
+      setPendingMove([center, center]);
+    }
   }
 
   function handleConfirmMove() {
@@ -323,6 +352,32 @@ export default function Gomoku() {
       setTurn(2); // 백(플레이어) 차례
       setFirstPlayerMove(null);
     }
+  }
+
+  // 모바일용 이동 버튼
+  function renderMoveButtons() {
+    if (!IS_MOBILE || !pendingMove || winner || aiThinking) return null;
+    const [y, x] = pendingMove;
+    const move = (dy, dx) => {
+      const ny = Math.max(0, Math.min(BOARD_SIZE - 1, y + dy));
+      const nx = Math.max(0, Math.min(BOARD_SIZE - 1, x + dx));
+      if (board[ny][nx] === 0) setPendingMove([ny, nx]);
+    };
+    return (
+      <div style={{ marginTop: 10 }}>
+        <div>
+          <button onClick={() => move(-1, 0)} style={{ width: 50, height: 50, fontSize: 24 }}>↑</button>
+        </div>
+        <div>
+          <button onClick={() => move(0, -1)} style={{ width: 50, height: 50, fontSize: 24 }}>←</button>
+          <button onClick={() => move(1, 0)} style={{ width: 50, height: 50, fontSize: 24, margin: '0 10px' }}>↓</button>
+          <button onClick={() => move(0, 1)} style={{ width: 50, height: 50, fontSize: 24 }}>→</button>
+        </div>
+        <div>
+          <button onClick={handleConfirmMove} style={{ width: 120, height: 40, fontSize: 20, marginTop: 8 }}>확인</button>
+        </div>
+      </div>
+    );
   }
 
   // 모바일 대응: SVG와 버튼에 터치 이벤트 추가, 반응형 스타일 적용
@@ -448,15 +503,16 @@ export default function Gomoku() {
               />
             )}
           </svg>
-          {/* 확인 버튼 */}
-          {pendingMove && !winner && !aiThinking && (
+          {/* 확인 버튼 및 모바일 이동 버튼 */}
+          {pendingMove && !winner && !aiThinking && !IS_MOBILE && (
             <button
               onClick={handleConfirmMove}
               style={{ marginTop: 16, padding: '10px 30px', fontSize: 18, background: '#222', color: '#fff', borderRadius: 8, border: 'none', cursor: 'pointer' }}
             >
-              확인
+              확인 (Enter)
             </button>
           )}
+          {renderMoveButtons()}
           <div style={{ marginTop: 20 }}>
             {winner
               ? <h3>{winner === playerStone ? '플레이어 승리!' : 'AI 승리!'}</h3>
