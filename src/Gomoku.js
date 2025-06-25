@@ -984,7 +984,37 @@ function improvedEvaluateMove(board, y, x, player, aiStone, playerStone) {
     board[y][x] = 0;
     return 900000; // 즉시 패배 방어
   }
+  // [추가] 상대방이 이 자리에 두면 열린3, 열린4가 되는지 체크해서 방어 점수 부여
+  const opponent = player === aiStone ? playerStone : aiStone;
+  board[y][x] = opponent;
+  let openThree = false, openFour = false;
+  const directions = [[1,0],[0,1],[1,1],[1,-1]];
+  for (const [dx, dy] of directions) {
+    let count = 1, openEnds = 0;
+    // 정방향
+    for (let i = 1; i <= 4; i++) {
+      const nx = x + dx * i, ny = y + dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === opponent) count++;
+        else if (board[ny][nx] === 0) { openEnds++; break; }
+        else break;
+      } else break;
+    }
+    // 역방향
+    for (let i = 1; i <= 4; i++) {
+      const nx = x - dx * i, ny = y - dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === opponent) count++;
+        else if (board[ny][nx] === 0) { openEnds++; break; }
+        else break;
+      } else break;
+    }
+    if (count === 4 && openEnds === 2) openFour = true;
+    if (count === 3 && openEnds === 2) openThree = true;
+  }
   board[y][x] = 0;
+  if (openFour) return 800000; // 열린4 방어
+  if (openThree) return 500000; // 열린3 방어
 
   // 2. 금수 감점
   if (checkDoubleOpenThree(board, y, x, player) ||
@@ -996,7 +1026,6 @@ function improvedEvaluateMove(board, y, x, player, aiStone, playerStone) {
   // 3. 패턴별 가중치 및 복수 위협 감지
   let score = 0;
   let openThrees = 0, openFours = 0;
-  const directions = [[1,0],[0,1],[1,1],[1,-1]];
   for (const [dx, dy] of directions) {
     let count = 1, openEnds = 0;
     // 정방향
@@ -1109,8 +1138,8 @@ export default function Gomoku() {
     
     // AI 모델 모드 처리
     if (difficulty.label === 'AI 모델') {
+      // 신경망 정책 사용
       try {
-        // 유효한 수들 찾기
         const validMoves = [];
         for (let y = 0; y < BOARD_SIZE; y++) {
           for (let x = 0; x < BOARD_SIZE; x++) {
@@ -1119,31 +1148,31 @@ export default function Gomoku() {
             }
           }
         }
-        
         if (validMoves.length > 0) {
           move = aiModelLoader.getBestMove(newBoard, aiStone, validMoves);
         }
       } catch (error) {
         console.error('AI 모델 사용 실패, 기본 AI로 대체:', error);
-        // AI 모델 실패 시 기본 MCTS 사용
         move = mcts(newBoard, 150, playerStone, aiStone);
       }
     } else if (difficulty.label === 'TITIBO 모드') {
-      // TITIBO 모드: MCTS + 미니맥스 조합 (300회 시뮬레이션)
-      move = mcts(newBoard, 300, playerStone, aiStone);
+      // TITIBO: MCTS 500회
+      move = mcts(newBoard, 500, playerStone, aiStone);
       if (!move) {
         const [, minimaxMove] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
         move = minimaxMove;
       }
     } else if (difficulty.label === 'TINI 모드') {
-      // TINI 모드: MCTS (200회 시뮬레이션)
-      move = mcts(newBoard, 200, playerStone, aiStone);
+      // TINI: minimax depth=3
+      const [, minimaxMove] = minimax(newBoard, 3, -Infinity, Infinity, true, aiStone, playerStone);
+      move = minimaxMove;
     } else if (difficulty.label === 'Hard') {
-      // Hard 모드: MCTS (150회 시뮬레이션)
-      move = mcts(newBoard, 150, playerStone, aiStone);
+      // Hard: minimax depth=2
+      const [, minimaxMove] = minimax(newBoard, 2, -Infinity, Infinity, true, aiStone, playerStone);
+      move = minimaxMove;
     } else {
-      // Easy/Normal 모드: 미니맥스 (빠름)
-      const [, minimaxMove] = minimax(newBoard, depth, -Infinity, Infinity, true, aiStone, playerStone);
+      // Easy/Normal: minimax depth=1
+      const [, minimaxMove] = minimax(newBoard, 1, -Infinity, Infinity, true, aiStone, playerStone);
       move = minimaxMove;
     }
     
