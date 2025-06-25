@@ -362,6 +362,11 @@ export default function Gomoku() {
       setLastMove([CENTER, CENTER]);
       setTurn(2); // 백(플레이어) 차례
       setFirstPlayerMove(null);
+      // 플레이어 차례일 때 중앙에서 임시 돌 시작
+      setPendingMove([CENTER, CENTER]);
+    } else {
+      // 플레이어가 선공(흑)일 때 중앙에서 임시 돌 시작
+      setPendingMove([CENTER, CENTER]);
     }
   }
 
