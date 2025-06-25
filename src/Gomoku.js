@@ -210,6 +210,70 @@ function getAdjacentEmpty(board, y, x) {
   return null;
 }
 
+// 3-3 금수 감지 함수
+function checkDoubleOpenThree(board, y, x, stone) {
+  const directions = [
+    [1, 0], [0, 1], [1, 1], [1, -1]
+  ];
+  let openThreeCount = 0;
+  
+  // 임시로 돌을 놓아서 테스트
+  board[y][x] = stone;
+  
+  for (let [dx, dy] of directions) {
+    // 양방향으로 확인
+    let count = 0;
+    let openEnds = 0;
+    
+    // 정방향 확인
+    for (let i = 1; i <= 4; i++) {
+      const nx = x + dx * i, ny = y + dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === stone) count++;
+        else if (board[ny][nx] === 0) {
+          openEnds++;
+          break;
+        } else break;
+      } else break;
+    }
+    
+    // 역방향 확인
+    for (let i = 1; i <= 4; i++) {
+      const nx = x - dx * i, ny = y - dy * i;
+      if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+        if (board[ny][nx] === stone) count++;
+        else if (board[ny][nx] === 0) {
+          openEnds++;
+          break;
+        } else break;
+      } else break;
+    }
+    
+    // 열린 3인지 확인 (돌 3개 + 양쪽이 열려있음)
+    if (count === 2 && openEnds === 2) {
+      openThreeCount++;
+    }
+  }
+  
+  // 원래 상태로 복원
+  board[y][x] = 0;
+  
+  return openThreeCount >= 2;
+}
+
+// 금수 위치 찾기
+function findForbiddenMoves(board, stone) {
+  const forbidden = [];
+  for (let y = 0; y < BOARD_SIZE; y++) {
+    for (let x = 0; x < BOARD_SIZE; x++) {
+      if (board[y][x] === 0 && checkDoubleOpenThree(board, y, x, stone)) {
+        forbidden.push([y, x]);
+      }
+    }
+  }
+  return forbidden;
+}
+
 export default function Gomoku() {
   const [board, setBoard] = useState(createEmptyBoard());
   const [turn, setTurn] = useState(1); // 1: 흑, 2: 백
@@ -224,6 +288,7 @@ export default function Gomoku() {
   const [aiThinking, setAiThinking] = useState(false);
   const [pendingMove, setPendingMove] = useState(null); // 임시 착수 위치
   const [showWelcome, setShowWelcome] = useState(true); // 환영 메시지 표시
+  const [forbiddenMoves, setForbiddenMoves] = useState([]); // 금수 위치
 
   // 환영 메시지 3초 후 자동 숨김
   React.useEffect(() => {
@@ -234,6 +299,14 @@ export default function Gomoku() {
       return () => clearTimeout(timer);
     }
   }, [showWelcome]);
+
+  // 금수 위치 업데이트
+  React.useEffect(() => {
+    if (!selecting && !selectingDifficulty && !winner) {
+      const forbidden = findForbiddenMoves(board, playerStone);
+      setForbiddenMoves(forbidden);
+    }
+  }, [board, playerStone, selecting, selectingDifficulty, winner]);
 
   function aiMove(newBoard, aiStone, playerStone, depth, firstPlayerMove) {
     if (newBoard.flat().every(cell => cell === 0)) {
@@ -333,6 +406,13 @@ export default function Gomoku() {
     if (!pendingMove || winner || aiThinking) return;
     const [y, x] = pendingMove;
     if (board[y][x] !== 0) return; // 빈 칸이 아니면 착수 불가
+    
+    // 3-3 금수 체크
+    if (checkDoubleOpenThree(board, y, x, playerStone)) {
+      alert('3-3 금수입니다! 다른 위치에 두세요.');
+      return;
+    }
+    
     const newBoard = board.map(row => row.slice());
     newBoard[y][x] = playerStone;
     setLastMove([y, x]);
@@ -439,8 +519,8 @@ export default function Gomoku() {
   };
 
   return (
-    <div style={{ textAlign: 'center', marginTop: 30 }}>
-      <h2>오목 게임 (React)</h2>
+    <div style={{ textAlign: 'center', marginTop: IS_MOBILE ? 5 : 30 }}>
+      <h2 style={{ fontSize: IS_MOBILE ? '18px' : '24px', margin: IS_MOBILE ? '2px 0' : '20px 0' }}>오목 게임 (React)</h2>
       {showWelcome && (
         <div style={{
           position: 'fixed',
@@ -460,12 +540,12 @@ export default function Gomoku() {
         </div>
       )}
       {selecting ? (
-        <div style={{ margin: '60px auto', display: 'inline-block', background: '#deb887', padding: 40, borderRadius: 10 }}>
-          <div style={{ fontSize: 28, marginBottom: 30 }}>돌을 선택하세요</div>
+        <div style={{ margin: IS_MOBILE ? '10px auto' : '60px auto', display: 'inline-block', background: '#deb887', padding: IS_MOBILE ? 15 : 40, borderRadius: 10 }}>
+          <div style={{ fontSize: IS_MOBILE ? 16 : 28, marginBottom: IS_MOBILE ? 10 : 30 }}>돌을 선택하세요</div>
           <button
             onClick={() => handleSelectStone(1)}
             style={{
-              width: 80, height: 80, marginRight: 30, fontSize: 22, borderRadius: 10, border: '2px solid #222', background: '#222', color: '#fff', cursor: 'pointer'
+              width: IS_MOBILE ? 50 : 80, height: IS_MOBILE ? 50 : 80, marginRight: IS_MOBILE ? 10 : 30, fontSize: IS_MOBILE ? 14 : 22, borderRadius: 10, border: '2px solid #222', background: '#222', color: '#fff', cursor: 'pointer'
             }}
           >
             흑
@@ -473,21 +553,21 @@ export default function Gomoku() {
           <button
             onClick={() => handleSelectStone(2)}
             style={{
-              width: 80, height: 80, fontSize: 22, borderRadius: 10, border: '2px solid #aaa', background: '#fff', color: '#222', cursor: 'pointer'
+              width: IS_MOBILE ? 50 : 80, height: IS_MOBILE ? 50 : 80, fontSize: IS_MOBILE ? 14 : 22, borderRadius: 10, border: '2px solid #aaa', background: '#fff', color: '#222', cursor: 'pointer'
             }}
           >
             백
           </button>
         </div>
       ) : selectingDifficulty ? (
-        <div style={{ margin: '60px auto', display: 'inline-block', background: '#deb887', padding: 40, borderRadius: 10 }}>
-          <div style={{ fontSize: 28, marginBottom: 30 }}>난이도를 선택하세요</div>
+        <div style={{ margin: IS_MOBILE ? '10px auto' : '60px auto', display: 'inline-block', background: '#deb887', padding: IS_MOBILE ? 15 : 40, borderRadius: 10 }}>
+          <div style={{ fontSize: IS_MOBILE ? 16 : 28, marginBottom: IS_MOBILE ? 10 : 30 }}>난이도를 선택하세요</div>
           {DIFFICULTY_LEVELS.map(level => (
             <button
               key={level.label}
               onClick={() => handleSelectDifficulty(level)}
               style={{
-                width: 120, height: 60, margin: 10, fontSize: 22, borderRadius: 10, border: '2px solid #222', background: '#fff', color: '#222', cursor: 'pointer'
+                width: IS_MOBILE ? 80 : 120, height: IS_MOBILE ? 35 : 60, margin: IS_MOBILE ? 3 : 10, fontSize: IS_MOBILE ? 10 : 22, borderRadius: 10, border: '2px solid #222', background: '#fff', color: '#222', cursor: 'pointer'
               }}
             >
               {level.label === 'Easy' ? 'EASY(이준희실력)' : level.label}
@@ -496,9 +576,9 @@ export default function Gomoku() {
         </div>
       ) : (
         <div style={boardContainerStyle}>
-          {aiThinking && <div style={{ color: 'red', fontWeight: 'bold', margin: 10 }}>AI 생각 중...</div>}
+          {aiThinking && <div style={{ color: 'red', fontWeight: 'bold', margin: IS_MOBILE ? 2 : 10, fontSize: IS_MOBILE ? 10 : 14 }}>AI 생각 중...</div>}
           <svg
-            width="100vw"
+            width={IS_MOBILE ? "85vw" : "100vw"}
             height={BOARD_PIXEL + 1}
             viewBox={`0 0 ${BOARD_PIXEL + 1} ${BOARD_PIXEL + 1}`}
             style={svgStyle}
@@ -545,6 +625,27 @@ export default function Gomoku() {
                 ) : null
               )
             )}
+            {/* 금수 위치 X표시 */}
+            {forbiddenMoves.map(([fy, fx]) => (
+              <g key={`forbidden-${fy}-${fx}`}>
+                <line
+                  x1={fx * CELL_SIZE - 8}
+                  y1={fy * CELL_SIZE - 8}
+                  x2={fx * CELL_SIZE + 8}
+                  y2={fy * CELL_SIZE + 8}
+                  stroke="red"
+                  strokeWidth={2}
+                />
+                <line
+                  x1={fx * CELL_SIZE + 8}
+                  y1={fy * CELL_SIZE - 8}
+                  x2={fx * CELL_SIZE - 8}
+                  y2={fy * CELL_SIZE + 8}
+                  stroke="red"
+                  strokeWidth={2}
+                />
+              </g>
+            ))}
             {/* 임시 착수 위치 표시 */}
             {pendingMove && !winner && !aiThinking && (
               <circle
@@ -568,7 +669,7 @@ export default function Gomoku() {
             </button>
           )}
           {renderMoveButtons()}
-          <div style={{ marginTop: IS_MOBILE ? 10 : 20 }}>
+          <div style={{ marginTop: IS_MOBILE ? 3 : 20 }}>
             {winner
               ? <h3 style={
                   difficulty.label === 'TINI 모드' && winner === playerStone 
@@ -587,16 +688,16 @@ export default function Gomoku() {
                     ? 'TITIBO 정복!!'
                     : winner === playerStone ? '플레이어 승리!' : 'AI 승리!'}
                 </h3>
-              : <span style={{ fontSize: IS_MOBILE ? '14px' : '16px' }}>현재 턴: {turn === playerStone ? (playerStone === 1 ? '흑(플레이어)' : '백(플레이어)') : (aiStone === 1 ? '흑(AI)' : '백(AI)')}</span>
+              : <span style={{ fontSize: IS_MOBILE ? '10px' : '16px' }}>현재 턴: {turn === playerStone ? (playerStone === 1 ? '흑(플레이어)' : '백(플레이어)') : (aiStone === 1 ? '흑(AI)' : '백(AI)')}</span>
             }
           </div>
           <button
             onClick={handleRestart}
             onTouchStart={handleRestart}
             style={{ 
-              marginTop: IS_MOBILE ? 5 : 10, 
-              padding: IS_MOBILE ? '6px 15px' : '8px 20px', 
-              fontSize: IS_MOBILE ? 14 : 16 
+              marginTop: IS_MOBILE ? 2 : 10, 
+              padding: IS_MOBILE ? '3px 10px' : '8px 20px', 
+              fontSize: IS_MOBILE ? 10 : 16 
             }}
           >
             다시하기
