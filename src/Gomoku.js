@@ -374,32 +374,6 @@ export default function Gomoku() {
     }
   }
 
-  // 모바일용 이동 버튼
-  function renderMoveButtons() {
-    if (!IS_MOBILE || !pendingMove || winner || aiThinking) return null;
-    const [y, x] = pendingMove;
-    const move = (dy, dx) => {
-      const ny = Math.max(0, Math.min(BOARD_SIZE - 1, y + dy));
-      const nx = Math.max(0, Math.min(BOARD_SIZE - 1, x + dx));
-      if (board[ny][nx] === 0) setPendingMove([ny, nx]);
-    };
-    return (
-      <div style={{ marginTop: 10 }}>
-        <div>
-          <button onClick={() => move(-1, 0)} style={{ width: 50, height: 50, fontSize: 24 }}>↑</button>
-        </div>
-        <div>
-          <button onClick={() => move(0, -1)} style={{ width: 50, height: 50, fontSize: 24 }}>←</button>
-          <button onClick={() => move(1, 0)} style={{ width: 50, height: 50, fontSize: 24, margin: '0 10px' }}>↓</button>
-          <button onClick={() => move(0, 1)} style={{ width: 50, height: 50, fontSize: 24 }}>→</button>
-        </div>
-        <div>
-          <button onClick={handleConfirmMove} style={{ width: 120, height: 40, fontSize: 20, marginTop: 8 }}>확인</button>
-        </div>
-      </div>
-    );
-  }
-
   // 모바일 대응: SVG와 버튼에 터치 이벤트 추가, 반응형 스타일 적용
   const boardContainerStyle = {
     display: 'inline-block',
