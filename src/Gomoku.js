@@ -42,14 +42,16 @@ function checkWinner(board) {
   return 0;
 }
 
-// 패턴 평가 함수 (간단 버전)
+// 패턴 평가 함수 (열린/막힌 가중치 강화)
 function evaluate(board, aiStone, playerStone) {
-  // 점수: 5목 > 4목 > 3목 > 2목, 열린/막힘 가중치
+  // 열린/막힌 패턴 가중치
   const patterns = [
     { score: 100000, length: 5 },
-    { score: 10000, length: 4 },
-    { score: 1000, length: 3 },
-    { score: 100, length: 2 },
+    { score: 20000, length: 4 }, // 열린4
+    { score: 8000, length: 4, blocked: true }, // 막힌4
+    { score: 2000, length: 3 }, // 열린3
+    { score: 500, length: 3, blocked: true }, // 막힌3
+    { score: 200, length: 2 },
   ];
   let score = 0;
   const directions = [
@@ -60,22 +62,22 @@ function evaluate(board, aiStone, playerStone) {
     for (let x = 0; x < BOARD_SIZE; x++) {
       if (board[y][x] !== aiStone) continue;
       for (let [dx, dy] of directions) {
-        for (let { score: s, length } of patterns) {
+        for (let p of patterns) {
           let cnt = 0;
-          for (let i = 0; i < length; i++) {
+          for (let i = 0; i < p.length; i++) {
             const nx = x + dx * i, ny = y + dy * i;
             if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] === aiStone) cnt++;
             else break;
           }
-          if (cnt === length) {
-            // 열린지 체크
+          if (cnt === p.length) {
             let before_x = x - dx, before_y = y - dy;
-            let after_x = x + dx * length, after_y = y + dy * length;
+            let after_x = x + dx * p.length, after_y = y + dy * p.length;
             let open_ends = 0;
             if (before_x >= 0 && before_x < BOARD_SIZE && before_y >= 0 && before_y < BOARD_SIZE && board[before_y][before_x] === 0) open_ends++;
             if (after_x >= 0 && after_x < BOARD_SIZE && after_y >= 0 && after_y < BOARD_SIZE && board[after_y][after_x] === 0) open_ends++;
-            if (length === 5) score += s;
-            else if (open_ends > 0) score += s * open_ends;
+            if (p.length === 5) score += p.score;
+            else if (p.blocked && open_ends === 1) score += p.score;
+            else if (!p.blocked && open_ends === 2) score += p.score;
           }
         }
       }
@@ -86,21 +88,22 @@ function evaluate(board, aiStone, playerStone) {
     for (let x = 0; x < BOARD_SIZE; x++) {
       if (board[y][x] !== playerStone) continue;
       for (let [dx, dy] of directions) {
-        for (let { score: s, length } of patterns) {
+        for (let p of patterns) {
           let cnt = 0;
-          for (let i = 0; i < length; i++) {
+          for (let i = 0; i < p.length; i++) {
             const nx = x + dx * i, ny = y + dy * i;
             if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] === playerStone) cnt++;
             else break;
           }
-          if (cnt === length) {
+          if (cnt === p.length) {
             let before_x = x - dx, before_y = y - dy;
-            let after_x = x + dx * length, after_y = y + dy * length;
+            let after_x = x + dx * p.length, after_y = y + dy * p.length;
             let open_ends = 0;
             if (before_x >= 0 && before_x < BOARD_SIZE && before_y >= 0 && before_y < BOARD_SIZE && board[before_y][before_x] === 0) open_ends++;
             if (after_x >= 0 && after_x < BOARD_SIZE && after_y >= 0 && after_y < BOARD_SIZE && board[after_y][after_x] === 0) open_ends++;
-            if (length === 5) score -= s;
-            else if (open_ends > 0) score -= s * open_ends;
+            if (p.length === 5) score -= p.score;
+            else if (p.blocked && open_ends === 1) score -= p.score;
+            else if (!p.blocked && open_ends === 2) score -= p.score;
           }
         }
       }
@@ -116,12 +119,12 @@ function minimax(board, depth, alpha, beta, maximizing, aiStone, playerStone) {
   if (winner === playerStone) return [-1000000, null];
   if (depth === 0) return [evaluate(board, aiStone, playerStone), null];
   let moves = [];
-  // 최근 돌 주변만 탐색(최대 2칸 이내)
+  // 최근 돌 주변 1칸만 후보로
   for (let y = 0; y < BOARD_SIZE; y++) {
     for (let x = 0; x < BOARD_SIZE; x++) {
       if (board[y][x] !== 0) {
-        for (let dy = -2; dy <= 2; dy++) {
-          for (let dx = -2; dx <= 2; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
             const ny = y + dy, nx = x + dx;
             if (ny >= 0 && ny < BOARD_SIZE && nx >= 0 && nx < BOARD_SIZE && board[ny][nx] === 0) {
               moves.push([ny, nx]);
@@ -209,6 +212,7 @@ export default function Gomoku() {
   const [difficulty, setDifficulty] = useState(DIFFICULTY_LEVELS[1]);
   const [firstPlayerMove, setFirstPlayerMove] = useState(null);
   const [aiThinking, setAiThinking] = useState(false);
+  const [pendingMove, setPendingMove] = useState(null); // 임시 착수 위치
 
   function aiMove(newBoard, aiStone, playerStone, depth, firstPlayerMove) {
     if (newBoard.flat().every(cell => cell === 0)) {
@@ -247,10 +251,18 @@ export default function Gomoku() {
     if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE) return;
     if (board[y][x] !== 0) return;
     if (turn !== playerStone) return;
+    setPendingMove([y, x]); // 임시 착수 위치만 표시
+  }
+
+  function handleConfirmMove() {
+    if (!pendingMove || winner || aiThinking) return;
+    const [y, x] = pendingMove;
+    if (board[y][x] !== 0) return;
     const newBoard = board.map(row => row.slice());
     newBoard[y][x] = playerStone;
     setLastMove([y, x]);
     setFirstPlayerMove(firstPlayerMove === null ? [y, x] : firstPlayerMove);
+    setPendingMove(null);
     const win = checkWinner(newBoard);
     setBoard(newBoard);
     if (win) {
@@ -420,7 +432,28 @@ export default function Gomoku() {
                 ) : null
               )
             )}
+            {/* 임시 착수 위치 표시 */}
+            {pendingMove && !winner && !aiThinking && (
+              <circle
+                cx={pendingMove[1] * CELL_SIZE}
+                cy={pendingMove[0] * CELL_SIZE}
+                r={STONE_RADIUS - 2}
+                fill={turn === 1 ? '#222' : '#fff'}
+                fillOpacity={0.5}
+                stroke="blue"
+                strokeWidth={2}
+              />
+            )}
           </svg>
+          {/* 확인 버튼 */}
+          {pendingMove && !winner && !aiThinking && (
+            <button
+              onClick={handleConfirmMove}
+              style={{ marginTop: 16, padding: '10px 30px', fontSize: 18, background: '#222', color: '#fff', borderRadius: 8, border: 'none', cursor: 'pointer' }}
+            >
+              확인
+            </button>
+          )}
           <div style={{ marginTop: 20 }}>
             {winner
               ? <h3>{winner === playerStone ? '플레이어 승리!' : 'AI 승리!'}</h3>
