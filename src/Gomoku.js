@@ -322,7 +322,11 @@ export default function Gomoku() {
           const win2 = checkWinner(newBoard);
           setBoard(newBoard);
           if (win2) setWinner(win2);
-          else setTurn(playerStone);
+          else {
+            setTurn(playerStone);
+            // 플레이어 차례가 되면 중앙에서 임시 돌 시작
+            setPendingMove([CENTER, CENTER]);
+          }
         }
         setAiThinking(false);
       }, 10);
