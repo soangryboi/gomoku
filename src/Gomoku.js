@@ -245,7 +245,7 @@ export default function Gomoku() {
     return [x, y];
   }
 
-  // 방향키로 임시 돌 이동
+  // 방향키로 임시 돌 이동 (돌이 있어도 이동 가능)
   useEffect(() => {
     if (winner || selecting || selectingDifficulty || aiThinking) return;
     const handleKeyDown = (e) => {
@@ -257,39 +257,50 @@ export default function Gomoku() {
       if (e.key === 'ArrowRight') x = Math.min(BOARD_SIZE - 1, x + 1);
       if (e.key === 'Enter') handleConfirmMove();
       if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
-        if (board[y][x] === 0) setPendingMove([y, x]);
+        setPendingMove([y, x]);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pendingMove, winner, selecting, selectingDifficulty, aiThinking, board]);
+  }, [pendingMove, winner, selecting, selectingDifficulty, aiThinking]);
 
-  // 클릭 시 중앙에서 임시 돌 시작
+  // 클릭 시 중앙에서 임시 돌 시작 (삭제)
   function handleClickBoard(e) {
-    if (winner || selecting || selectingDifficulty || aiThinking) return;
-    const center = Math.floor(BOARD_SIZE / 2);
-    if (board[center][center] !== 0) {
-      // 중앙이 이미 차있으면, 가장 가까운 빈칸 탐색
-      for (let d = 1; d < BOARD_SIZE; d++) {
-        for (let dy = -d; dy <= d; dy++) {
-          for (let dx = -d; dx <= d; dx++) {
-            const y = center + dy, x = center + dx;
-            if (y >= 0 && y < BOARD_SIZE && x >= 0 && x < BOARD_SIZE && board[y][x] === 0) {
-              setPendingMove([y, x]);
-              return;
-            }
-          }
-        }
-      }
-    } else {
-      setPendingMove([center, center]);
-    }
+    // 아무 동작 없음
+    return;
   }
 
+  // 모바일용 이동 버튼 (돌이 있어도 이동 가능)
+  function renderMoveButtons() {
+    if (!IS_MOBILE || !pendingMove || winner || aiThinking) return null;
+    const [y, x] = pendingMove;
+    const move = (dy, dx) => {
+      const ny = Math.max(0, Math.min(BOARD_SIZE - 1, y + dy));
+      const nx = Math.max(0, Math.min(BOARD_SIZE - 1, x + dx));
+      setPendingMove([ny, nx]);
+    };
+    return (
+      <div style={{ marginTop: 10 }}>
+        <div>
+          <button onClick={() => move(-1, 0)} style={{ width: 50, height: 50, fontSize: 24 }}>↑</button>
+        </div>
+        <div>
+          <button onClick={() => move(0, -1)} style={{ width: 50, height: 50, fontSize: 24 }}>←</button>
+          <button onClick={() => move(1, 0)} style={{ width: 50, height: 50, fontSize: 24, margin: '0 10px' }}>↓</button>
+          <button onClick={() => move(0, 1)} style={{ width: 50, height: 50, fontSize: 24 }}>→</button>
+        </div>
+        <div>
+          <button onClick={handleConfirmMove} style={{ width: 120, height: 40, fontSize: 20, marginTop: 8 }}>확인</button>
+        </div>
+      </div>
+    );
+  }
+
+  // 착수(확인/Enter) 시에만 빈 칸인지 검사
   function handleConfirmMove() {
     if (!pendingMove || winner || aiThinking) return;
     const [y, x] = pendingMove;
-    if (board[y][x] !== 0) return;
+    if (board[y][x] !== 0) return; // 빈 칸이 아니면 착수 불가
     const newBoard = board.map(row => row.slice());
     newBoard[y][x] = playerStone;
     setLastMove([y, x]);
