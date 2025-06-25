@@ -236,16 +236,19 @@ export default function Gomoku() {
     }
     const svg = e.target.closest('svg');
     const rect = svg.getBoundingClientRect();
-    const svgWidth = svg.viewBox.baseVal.width;
-    const svgHeight = svg.viewBox.baseVal.height;
-    const x = ((clientX - rect.left) / rect.width) * svgWidth;
-    const y = ((clientY - rect.top) / rect.height) * svgHeight;
+    // viewBox와 실제 렌더링 크기 비율을 정확히 반영
+    const viewBox = svg.viewBox.baseVal;
+    const scaleX = viewBox.width / rect.width;
+    const scaleY = viewBox.height / rect.height;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
     return [x, y];
   }
 
   function handleClickBoard(e) {
     if (winner || selecting || selectingDifficulty || aiThinking) return;
     const [offsetX, offsetY] = getSvgCoords(e);
+    // 격자 교차점에 가장 가깝게 보정
     const x = Math.round(offsetX / CELL_SIZE);
     const y = Math.round(offsetY / CELL_SIZE);
     if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE) return;
@@ -340,7 +343,6 @@ export default function Gomoku() {
     maxWidth: 700,
     width: '100vw',
     height: BOARD_PIXEL + 1,
-    touchAction: 'manipulation',
     display: 'block',
   };
 
@@ -392,6 +394,7 @@ export default function Gomoku() {
             style={svgStyle}
             onClick={handleClickBoard}
             onTouchStart={handleClickBoard}
+            tabIndex={0}
           >
             {/* 격자판 */}
             {Array.from({ length: BOARD_SIZE }).map((_, i) => (
