@@ -188,6 +188,7 @@ const DIFFICULTY_LEVELS = [
   { label: 'Normal', depth: 2 },
   { label: 'Hard', depth: 3 },
   { label: 'TINI 모드', depth: 3 },
+  { label: 'TITIBO 모드', depth: 4 },
 ];
 
 function getAdjacentEmpty(board, y, x) {
@@ -311,17 +312,17 @@ export default function Gomoku() {
       setPendingMove([ny, nx]);
     };
     return (
-      <div style={{ marginTop: 10 }}>
-        <div>
-          <button onClick={() => move(-1, 0)} style={{ width: 50, height: 50, fontSize: 24 }}>↑</button>
+      <div style={{ marginTop: 5, marginBottom: 5 }}>
+        <div style={{ textAlign: 'center', marginBottom: 5 }}>
+          <button onClick={() => move(-1, 0)} style={{ width: 45, height: 45, fontSize: 20, margin: 2 }}>↑</button>
         </div>
-        <div>
-          <button onClick={() => move(0, -1)} style={{ width: 50, height: 50, fontSize: 24 }}>←</button>
-          <button onClick={() => move(1, 0)} style={{ width: 50, height: 50, fontSize: 24, margin: '0 10px' }}>↓</button>
-          <button onClick={() => move(0, 1)} style={{ width: 50, height: 50, fontSize: 24 }}>→</button>
+        <div style={{ textAlign: 'center', marginBottom: 5 }}>
+          <button onClick={() => move(0, -1)} style={{ width: 45, height: 45, fontSize: 20, margin: 2 }}>←</button>
+          <button onClick={() => move(1, 0)} style={{ width: 45, height: 45, fontSize: 20, margin: 2 }}>↓</button>
+          <button onClick={() => move(0, 1)} style={{ width: 45, height: 45, fontSize: 20, margin: 2 }}>→</button>
         </div>
-        <div>
-          <button onClick={handleConfirmMove} style={{ width: 120, height: 40, fontSize: 20, marginTop: 8 }}>확인</button>
+        <div style={{ textAlign: 'center' }}>
+          <button onClick={handleConfirmMove} style={{ width: 100, height: 35, fontSize: 16, background: '#222', color: '#fff', borderRadius: 5 }}>확인</button>
         </div>
       </div>
     );
@@ -409,14 +410,18 @@ export default function Gomoku() {
   const boardContainerStyle = {
     display: 'inline-block',
     background: '#deb887',
-    padding: 20,
+    padding: IS_MOBILE ? 10 : 20,
     borderRadius: 10,
     boxShadow: '0 0 10px #aaa',
     maxWidth: '100vw',
     overflowX: 'auto',
     touchAction: 'manipulation',
     // 모바일에서 불필요한 빈 공간 제거
-    ...(IS_MOBILE && { height: 'fit-content' }),
+    ...(IS_MOBILE && { 
+      height: 'fit-content',
+      margin: '10px auto',
+      paddingBottom: 5
+    }),
   };
   const svgStyle = {
     background: '#deb887',
@@ -426,6 +431,11 @@ export default function Gomoku() {
     width: '100vw',
     height: BOARD_PIXEL + 1,
     display: 'block',
+    // 모바일에서 SVG 크기 최적화
+    ...(IS_MOBILE && {
+      maxWidth: '90vw',
+      width: '90vw',
+    }),
   };
 
   return (
@@ -558,28 +568,36 @@ export default function Gomoku() {
             </button>
           )}
           {renderMoveButtons()}
-          <div style={{ marginTop: 20 }}>
+          <div style={{ marginTop: IS_MOBILE ? 10 : 20 }}>
             {winner
               ? <h3 style={
                   difficulty.label === 'TINI 모드' && winner === playerStone 
                     ? { fontSize: '2.5em', fontWeight: 'bold', color: '#ff6b6b', textShadow: '2px 2px 4px rgba(0,0,0,0.3)' }
                     : difficulty.label === 'Easy' && winner === playerStone
                     ? { fontSize: '2.5em', fontWeight: 'bold', color: '#ff6b6b', textShadow: '2px 2px 4px rgba(0,0,0,0.3)' }
+                    : difficulty.label === 'TITIBO 모드' && winner === playerStone
+                    ? { fontSize: '3em', fontWeight: 'bold', color: '#ffd700', textShadow: '3px 3px 6px rgba(0,0,0,0.5)', animation: 'glow 2s ease-in-out infinite alternate' }
                     : {}
                 }>
                   {difficulty.label === 'TINI 모드' && winner === playerStone 
                     ? '티티보 우승!!' 
                     : difficulty.label === 'Easy' && winner === playerStone
                     ? '이준띠띠 DOWN!!'
+                    : difficulty.label === 'TITIBO 모드' && winner === playerStone
+                    ? 'TITIBO 정복!!'
                     : winner === playerStone ? '플레이어 승리!' : 'AI 승리!'}
                 </h3>
-              : <span>현재 턴: {turn === playerStone ? (playerStone === 1 ? '흑(플레이어)' : '백(플레이어)') : (aiStone === 1 ? '흑(AI)' : '백(AI)')}</span>
+              : <span style={{ fontSize: IS_MOBILE ? '14px' : '16px' }}>현재 턴: {turn === playerStone ? (playerStone === 1 ? '흑(플레이어)' : '백(플레이어)') : (aiStone === 1 ? '흑(AI)' : '백(AI)')}</span>
             }
           </div>
           <button
             onClick={handleRestart}
             onTouchStart={handleRestart}
-            style={{ marginTop: 10, padding: '8px 20px', fontSize: 16 }}
+            style={{ 
+              marginTop: IS_MOBILE ? 5 : 10, 
+              padding: IS_MOBILE ? '6px 15px' : '8px 20px', 
+              fontSize: IS_MOBILE ? 14 : 16 
+            }}
           >
             다시하기
           </button>

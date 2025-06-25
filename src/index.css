@@ -11,3 +11,12 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+@keyframes glow {
+  from {
+    text-shadow: 3px 3px 6px rgba(0,0,0,0.5), 0 0 10px #ffd700, 0 0 20px #ffd700;
+  }
+  to {
+    text-shadow: 3px 3px 6px rgba(0,0,0,0.5), 0 0 20px #ffd700, 0 0 30px #ffd700, 0 0 40px #ffd700;
+  }
+}
